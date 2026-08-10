@@ -41,41 +41,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
     );
 
     _animController.forward();
-
-    _checkAutoRecovery();
+    _startTimer();
   }
 
-  Future<void> _checkAutoRecovery() async {
-    if (!mounted) return;
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final activeId = prefs.getString('active_session_id');
-
-      if (activeId != null && activeId.isNotEmpty) {
-        final projects = await ProjectStorageService.loadSavedProjects();
-        final recoveredProject = projects.where((p) => p.id == activeId).firstOrNull;
-
-        if (recoveredProject != null) {
-          // Recover into provider
-          ref.read(editorProjectProvider.notifier).loadProject(recoveredProject);
-          // Clear active session to prevent looping if they discard it later
-          await prefs.remove('active_session_id');
-
-          Navigator.of(context).pushReplacement(
-            PageRouteBuilder(
-              pageBuilder: (_, __, ___) => const EditorScreen(),
-              transitionsBuilder: (_, anim, __, child) {
-                return FadeTransition(opacity: anim, child: child);
-              },
-            ),
-          );
-          return;
-        }
-      }
-    } catch (_) {}
-
-    // Normal startup: wait for splash animation
+  Future<void> _startTimer() async {
     await Future.delayed(const Duration(seconds: 3));
     if (!mounted) return;
 
@@ -88,6 +57,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
       ),
     );
   }
+
+
 
   @override
   void dispose() {

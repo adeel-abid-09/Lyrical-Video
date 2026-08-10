@@ -11,7 +11,7 @@ import '../../state/editor_state_notifier.dart';
 import '../../theme/app_theme.dart';
 
 class InteractiveCanvasWidget extends ConsumerStatefulWidget {
-  final VoidCallback? onOpenTextEditor;
+  final void Function({int initialIndex})? onOpenTextEditor;
 
   const InteractiveCanvasWidget({
     super.key,
@@ -26,6 +26,11 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
   final Map<String, VideoPlayerController> _videoControllers = {};
   Timer? _playbackTimer;
   final ImagePicker _picker = ImagePicker();
+
+  // For text gesture tracking
+  double _baseTextScale = 1.0;
+  double _baseTextRotation = 0.0;
+  Offset _baseTextPosition = Offset.zero;
 
   @override
   void initState() {
@@ -362,21 +367,40 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                 left: left,
                                 top: top,
                                 child: GestureDetector(
-                                  onTap: () {
+                                  onScaleStart: (details) {
                                     notifier.selectLayer(textLayer.id);
+                                    _baseTextScale = textLayer.scaleX;
+                                    _baseTextRotation = textLayer.rotation;
+                                    _baseTextPosition = textLayer.position;
                                   },
-                                  onPanUpdate: (details) {
-                                    final newDx = (left + details.delta.dx + 60) / constraints.maxWidth;
-                                    final newDy = (top + details.delta.dy + 30) / constraints.maxHeight;
+                                  onScaleUpdate: (details) {
+                                    // Calculate new position
+                                    final currentDx = _baseTextPosition.dx * constraints.maxWidth;
+                                    final currentDy = _baseTextPosition.dy * constraints.maxHeight;
+                                    
+                                    final newDx = (currentDx + details.focalPointDelta.dx) / constraints.maxWidth;
+                                    final newDy = (currentDy + details.focalPointDelta.dy) / constraints.maxHeight;
+                                    
+                                    _baseTextPosition = Offset(
+                                      newDx.clamp(0.05, 0.95),
+                                      newDy.clamp(0.05, 0.95),
+                                    );
+
+                                    // Calculate new scale and rotation
+                                    final newScale = (_baseTextScale * details.scale).clamp(0.5, 5.0);
+                                    final newRotation = _baseTextRotation + details.rotation;
 
                                     notifier.updateTextLayer(
                                       textLayer.copyWith(
-                                        position: Offset(
-                                          newDx.clamp(0.05, 0.95),
-                                          newDy.clamp(0.05, 0.95),
-                                        ),
+                                        position: _baseTextPosition,
+                                        scaleX: newScale,
+                                        scaleY: newScale,
+                                        rotation: newRotation,
                                       ),
                                     );
+                                  },
+                                  onScaleEnd: (details) {
+                                    notifier.pushHistory(); // Save the final state to undo stack
                                   },
                                   child: Transform.rotate(
                                     angle: textLayer.rotation,
@@ -430,7 +454,7 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                                 left: -12,
                                                 top: -12,
                                                 child: GestureDetector(
-                                                  onTap: widget.onOpenTextEditor,
+                                                  onTap: () => widget.onOpenTextEditor?.call(),
                                                   child: const CircleAvatar(
                                                     radius: 10,
                                                     backgroundColor: AppTheme.primaryAccent,

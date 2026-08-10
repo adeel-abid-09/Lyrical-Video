@@ -43,7 +43,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     });
   }
 
-  void _pushHistory() {
+  void pushHistory() {
     _undoStack.add(state);
     _redoStack.clear();
   }
@@ -69,7 +69,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void setAspectRatio(ProjectAspectRatio ratio) {
-    _pushHistory();
+    pushHistory();
     state = state.copyWith(
       aspectRatio: ratio,
       updatedAt: DateTime.now(),
@@ -77,7 +77,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void setDuration(double duration) {
-    _pushHistory();
+    pushHistory();
     state = state.copyWith(
       duration: duration,
       updatedAt: DateTime.now(),
@@ -109,7 +109,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   // --- Text Layer Operations ---
 
   void addTextLayer(String text, {Offset position = const Offset(0.5, 0.5)}) {
-    _pushHistory();
+    pushHistory();
     final newLayer = TextLayerModel(
       id: const Uuid().v4(),
       text: text,
@@ -128,7 +128,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void addTextLayers(List<TextLayerModel> layers) {
-    _pushHistory();
+    pushHistory();
     final updated = [...state.textLayers, ...layers];
     state = state.copyWith(
       textLayers: updated,
@@ -137,7 +137,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void updateTextLayer(TextLayerModel updatedLayer) {
-    _pushHistory();
+    pushHistory();
     final updated = state.textLayers.map((l) {
       return l.id == updatedLayer.id ? updatedLayer : l;
     }).toList();
@@ -149,7 +149,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void deleteTextLayer(String id) {
-    _pushHistory();
+    pushHistory();
     final updated = state.textLayers.where((l) => l.id != id).toList();
     state = state.copyWith(
       textLayers: updated,
@@ -168,7 +168,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     final layer = state.textLayers[layerIndex];
     if (splitTime <= layer.startTime || splitTime >= layer.endTime) return; 
     
-    _pushHistory();
+    pushHistory();
     
     final layer1 = layer.copyWith(endTime: splitTime);
     final layer2 = layer.copyWith(
@@ -193,7 +193,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     final layer = state.textLayers[layerIndex];
     if (time >= layer.endTime) return;
     
-    _pushHistory();
+    pushHistory();
     
     final updated = List<TextLayerModel>.from(state.textLayers);
     updated[layerIndex] = layer.copyWith(startTime: time);
@@ -207,7 +207,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     final layer = state.textLayers[layerIndex];
     if (time <= layer.startTime) return;
     
-    _pushHistory();
+    pushHistory();
     
     final updated = List<TextLayerModel>.from(state.textLayers);
     updated[layerIndex] = layer.copyWith(endTime: time);
@@ -217,7 +217,9 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   // --- Media Layer Operations ---
 
   void addMediaLayer(MediaLayerModel media) {
-    _pushHistory();
+    if (media.type == MediaType.video) {
+      pushHistory();
+    }
     final updated = [...state.mediaLayers, media];
 
     // If media duration > current project duration, extend project duration
@@ -234,7 +236,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void updateMediaLayer(MediaLayerModel updatedMedia) {
-    _pushHistory();
+    pushHistory();
     final updated = state.mediaLayers.map((m) {
       return m.id == updatedMedia.id ? updatedMedia : m;
     }).toList();
@@ -246,7 +248,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void updateMediaLayerProperties(String id, {double? volume, double? playbackSpeed, double? startTime, double? trimStartTime, double? mediaDuration}) {
-    _pushHistory();
+    pushHistory();
     state = state.copyWith(
       mediaLayers: state.mediaLayers.map((layer) {
         if (layer.id == id) {
@@ -270,7 +272,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     final layer = state.mediaLayers[layerIndex];
     if (splitTime <= layer.startTime || splitTime >= layer.startTime + layer.mediaDuration) return; // Cannot split outside bounds
     
-    _pushHistory();
+    pushHistory();
     
     final duration1 = splitTime - layer.startTime;
     final duration2 = layer.mediaDuration - duration1;
@@ -294,7 +296,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void replaceMediaLayerPath(String id, String newPath, double newDuration) {
-    _pushHistory();
+    pushHistory();
     state = state.copyWith(
       mediaLayers: state.mediaLayers.map((layer) {
         if (layer.id == id) {
@@ -314,7 +316,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     if (layerIndex == -1) return;
     final videoLayer = state.mediaLayers[layerIndex];
     
-    _pushHistory();
+    pushHistory();
     final audioLayer = MediaLayerModel(
       id: const Uuid().v4(),
       path: audioPath,
@@ -339,7 +341,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     final layer = state.mediaLayers[layerIndex];
     if (time >= layer.startTime + layer.mediaDuration) return;
     
-    _pushHistory();
+    pushHistory();
     
     final diff = time - layer.startTime;
     final updated = List<MediaLayerModel>.from(state.mediaLayers);
@@ -358,7 +360,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     final layer = state.mediaLayers[layerIndex];
     if (time <= layer.startTime) return;
     
-    _pushHistory();
+    pushHistory();
     
     final diff = time - layer.startTime;
     final updated = List<MediaLayerModel>.from(state.mediaLayers);
@@ -369,7 +371,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void deleteMediaLayer(String id) {
-    _pushHistory();
+    pushHistory();
     final updated = state.mediaLayers.where((m) => m.id != id).toList();
     state = state.copyWith(
       mediaLayers: updated,
@@ -379,7 +381,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void toggleMuteMediaLayer(String id) {
-    _pushHistory();
+    pushHistory();
     final updated = state.mediaLayers.map((m) {
       if (m.id == id) {
         return m.copyWith(isMuted: !m.isMuted);
@@ -394,7 +396,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void reorderTextLayers(int oldIndex, int newIndex) {
-    _pushHistory();
+    pushHistory();
     final list = List<TextLayerModel>.from(state.textLayers);
     if (newIndex > oldIndex) newIndex--;
     final item = list.removeAt(oldIndex);
@@ -402,6 +404,19 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
 
     state = state.copyWith(
       textLayers: list,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void reorderMediaLayers(int oldIndex, int newIndex) {
+    pushHistory();
+    final list = List<MediaLayerModel>.from(state.mediaLayers);
+    if (newIndex > oldIndex) newIndex--;
+    final item = list.removeAt(oldIndex);
+    list.insert(newIndex, item);
+
+    state = state.copyWith(
+      mediaLayers: list,
       updatedAt: DateTime.now(),
     );
   }

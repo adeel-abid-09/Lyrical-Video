@@ -12,7 +12,7 @@ import '../../theme/app_theme.dart';
 enum ToolbarCategory { main, text, audio, video, stickers, ratio }
 
 class HorizontalToolbarsWidget extends ConsumerStatefulWidget {
-  final VoidCallback onOpenTextEditor;
+  final void Function({int initialIndex}) onOpenTextEditor;
   final VoidCallback onOpenManualLyrics;
   final VoidCallback onOpenLayersPanel;
   final VoidCallback onOpenRatioSelector;
@@ -284,8 +284,13 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
 
       case ToolbarCategory.text:
         return [
-          _buildItem(Icons.edit_rounded, 'Edit', widget.onOpenTextEditor),
-          _buildItem(Icons.style_rounded, 'Style', widget.onOpenTextEditor),
+          _buildItem(Icons.keyboard_alt_rounded, 'Edit', () => widget.onOpenTextEditor(initialIndex: 0)),
+          _buildItem(Icons.font_download_rounded, 'Font', () => widget.onOpenTextEditor(initialIndex: 2)),
+          _buildItem(Icons.color_lens_rounded, 'Style', () => widget.onOpenTextEditor(initialIndex: 1)),
+          // We can add more specific text features in the future, for now they map to the text editor tabs
+          _buildItem(Icons.animation_rounded, 'Animations', () {
+             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Animations coming in next update!')));
+          }),
           _buildItem(Icons.content_cut_rounded, 'Split', () {
             final project = ref.read(editorProjectProvider);
             if (project.selectedLayerId != null) {
@@ -347,6 +352,12 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               max: 2.0,
               onChanged: (val) => ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(layer.id, volume: val),
             );
+          }),
+          _buildItem(Icons.speed_rounded, 'Speed', () {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Speed control coming soon!')));
+          }),
+          _buildItem(Icons.filter_b_and_w_rounded, 'Filters', () {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Filters coming soon!')));
           }),
           _buildItem(Icons.delete_outline_rounded, 'Delete', () {
             final project = ref.read(editorProjectProvider);

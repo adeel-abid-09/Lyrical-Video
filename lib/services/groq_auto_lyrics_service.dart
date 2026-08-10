@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../models/text_layer_model.dart';
 
 class AutoLyricItem {
@@ -21,12 +22,11 @@ class AutoLyricItem {
 }
 
 class GroqAutoLyricsService {
-  static const String _grokApiEndpoint = 'https://api.grok.ai/v1/audio/transcriptions'; // Example endpoint, need to verify
+  static const String _apiUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
   
-  // TO-DO: Remove hardcoded keys and load from a configuration or environment file.
-  static const List<String> _apiKeys = [
-    'YOUR_GROQ_API_KEY_1',
-    'YOUR_GROQ_API_KEY_2'
+  static List<String> get _apiKeys => [
+    dotenv.env['GROQ_API_KEY_1'] ?? '',
+    dotenv.env['GROQ_API_KEY_2'] ?? '',
   ];
   static const String _storageKey = 'groq_api_key';
   
@@ -34,7 +34,7 @@ class GroqAutoLyricsService {
 
   static Future<String> getApiKey() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_storageKey) ?? defaultApiKeys[_currentKeyIndex];
+    return prefs.getString(_storageKey) ?? _apiKeys[_currentKeyIndex];
   }
 
   static Future<void> saveApiKey(String key) async {
@@ -76,17 +76,20 @@ class GroqAutoLyricsService {
 
       final uri = Uri.parse('https://api.groq.com/openai/v1/audio/translations');
       
-      int maxRetries = defaultApiKeys.length;
+      
+      int maxRetries = _apiKeys.length;
       int attempts = 0;
       
       while (attempts < maxRetries) {
         try {
           final apiKey = await getApiKey();
-          final request = http.MultipartRequest('POST', uri)
-            ..headers['Authorization'] = 'Bearer $apiKey'
-            ..fields['model'] = 'whisper-large-v3'
-            ..fields['response_format'] = 'verbose_json'
-            ..files.add(await http.MultipartFile.fromPath('file', finalUploadPath));
+          var request = http.MultipartRequest('POST', Uri.parse(_apiUrl));
+          request.headers.addAll({
+            'Authorization': 'Bearer $apiKey',
+          });
+          request.fields['model'] = 'whisper-large-v3';
+          request.fields['response_format'] = 'verbose_json';
+          request.files.add(await http.MultipartFile.fromPath('file', finalUploadPath));
 
           final streamedResponse = await request.send();
           final response = await http.Response.fromStream(streamedResponse);
@@ -133,7 +136,7 @@ class GroqAutoLyricsService {
           } else if (response.statusCode == 401 || response.statusCode == 429) {
             // API key expired or rate limited. Fallback to next key.
             debugPrint('Groq API Key failed with status ${response.statusCode}. Trying next key...');
-            _currentKeyIndex = (_currentKeyIndex + 1) % defaultApiKeys.length;
+            _currentKeyIndex = (_currentKeyIndex + 1) % _apiKeys.length;
             attempts++;
             if (attempts >= maxRetries) {
               throw Exception('All Groq API Keys failed. Last error: ${response.statusCode} - ${response.body}');
@@ -146,7 +149,7 @@ class GroqAutoLyricsService {
             rethrow;
           }
           attempts++;
-          _currentKeyIndex = (_currentKeyIndex + 1) % defaultApiKeys.length;
+          _currentKeyIndex = (_currentKeyIndex + 1) % _apiKeys.length;
         }
       }
       

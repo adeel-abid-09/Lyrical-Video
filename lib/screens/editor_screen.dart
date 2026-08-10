@@ -114,8 +114,22 @@ class EditorScreen extends ConsumerWidget {
               }
             },
           ),
-        title: Text(project.title),
+        title: Text(project.title, style: const TextStyle(fontSize: 16)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.undo_rounded),
+            color: ref.read(editorProjectProvider.notifier).canUndo ? Colors.white : Colors.white24,
+            onPressed: () {
+              ref.read(editorProjectProvider.notifier).undo();
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.redo_rounded),
+            color: ref.read(editorProjectProvider.notifier).canRedo ? Colors.white : Colors.white24,
+            onPressed: () {
+              ref.read(editorProjectProvider.notifier).redo();
+            },
+          ),
           Container(
             margin: const EdgeInsets.only(right: 12),
             child: ElevatedButton.icon(
@@ -143,7 +157,7 @@ class EditorScreen extends ConsumerWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: InteractiveCanvasWidget(
-                  onOpenTextEditor: () => _openTextEditor(context),
+                  onOpenTextEditor: ({int initialIndex = 0}) => _openTextEditor(context, initialIndex: initialIndex),
                 ),
               ),
             ),

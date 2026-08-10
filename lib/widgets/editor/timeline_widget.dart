@@ -15,6 +15,9 @@ class CapCutTimelineWidget extends ConsumerStatefulWidget {
 class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
   final ScrollController _horizontalScrollController = ScrollController();
   bool _isUserScrolling = false;
+  
+  double _timeScale = 44.0;
+  double _baseScale = 44.0;
 
   @override
   void dispose() {
@@ -24,20 +27,11 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
 
   void _scrollToPlayhead(double playhead, double containerWidth) {
     if (!_horizontalScrollController.hasClients) return;
-    if (_isUserScrolling) return; // Do not auto-scroll if user is panning
+    if (_isUserScrolling) return;
 
-    final targetX = playhead * 44.0;
-    final currentScroll = _horizontalScrollController.offset;
+    final targetScroll = playhead * _timeScale;
     final maxScroll = _horizontalScrollController.position.maxScrollExtent;
-
-    if (targetX > currentScroll + containerWidth - 60 || targetX < currentScroll) {
-      final desiredScroll = (targetX - containerWidth / 2).clamp(0.0, maxScroll);
-      _horizontalScrollController.animateTo(
-        desiredScroll,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
-    }
+    _horizontalScrollController.jumpTo(targetScroll.clamp(0.0, maxScroll));
   }
 
   @override
@@ -125,13 +119,6 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                     },
                   ),
 
-                  const Spacer(),
-
-                  // Time Counter Right
-                  Text(
-                    '${_formatTime(playhead)} / ${_formatTime(duration)}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 11, fontFamily: 'monospace'),
-                  ),
                 ],
               ),
             ),
@@ -140,235 +127,265 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final trackWidth = (totalSeconds * 44.0 + 60.0).clamp(constraints.maxWidth, double.infinity);
+                  final halfWidth = constraints.maxWidth / 2;
+                  final trackWidth = (totalSeconds * _timeScale).clamp(0.0, double.infinity);
 
-                  return NotificationListener<ScrollNotification>(
-                    onNotification: (scrollNotification) {
-                      if (scrollNotification is ScrollStartNotification) {
-                        if (scrollNotification.dragDetails != null) {
-                          _isUserScrolling = true;
-                        }
-                      } else if (scrollNotification is ScrollEndNotification) {
-                        _isUserScrolling = false;
-                      }
-                      return false;
+                  return GestureDetector(
+                    onScaleStart: (details) {
+                      _baseScale = _timeScale;
                     },
-                    child: SingleChildScrollView(
-                      controller: _horizontalScrollController,
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: trackWidth,
-                        child: Stack(
-                          children: [
-                            // Tappable Seconds Ruler
-                            Positioned(
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              height: 22,
-                              child: GestureDetector(
-                                onPanStart: (details) {
-                                  ref.read(editorProjectProvider.notifier).setScrubbing(true);
-                                },
-                                onPanUpdate: (details) {
-                                  final project = ref.read(editorProjectProvider);
-                                  if (!project.isScrubbing) {
-                                    ref.read(editorProjectProvider.notifier).setScrubbing(true);
-                                  }
-                                  final newScroll = (_horizontalScrollController.offset - details.delta.dx).clamp(
-                                    0.0,
-                                    _horizontalScrollController.position.maxScrollExtent,
-                                  );
-                                  _horizontalScrollController.jumpTo(newScroll);
-                                  
-                                  final playheadX = newScroll + (MediaQuery.of(context).size.width * 0.5);
-                                  final playheadTime = (playheadX / 44.0).clamp(0.0, duration);
-                                  ref.read(editorProjectProvider.notifier).seekPlayhead(playheadTime);
-                                },
-                                onPanEnd: (details) {
-                                  ref.read(editorProjectProvider.notifier).setScrubbing(false);
-                                },
-                                onPanCancel: () {
-                                  ref.read(editorProjectProvider.notifier).setScrubbing(false);
-                                },
-                                onTapDown: (details) {
-                                  // localPosition is relative to the track which has `trackWidth`
-                                  final playheadTime = (details.localPosition.dx / 44.0).clamp(0.0, duration);
-                                  notifier.seekPlayhead(playheadTime);
-                                },
-                                child: Container(
-                                  color: const Color(0xFF14141E),
-                                  child: Row(
-                                    children: List.generate(totalSeconds + 1, (index) {
-                                      return SizedBox(
-                                        width: 44,
-                                        child: Column(
-                                          children: [
-                                            Text(
-                                              '${index.toString().padLeft(2, '0')}s',
-                                              style: const TextStyle(color: Colors.white38, fontSize: 10),
+                    onScaleUpdate: (details) {
+                      if (details.pointerCount >= 2) {
+                        setState(() {
+                          _timeScale = (_baseScale * details.scale).clamp(10.0, 200.0);
+                        });
+                      }
+                    },
+                    child: Stack(
+                      children: [
+                        NotificationListener<ScrollNotification>(
+                        onNotification: (scrollNotification) {
+                          if (scrollNotification is ScrollStartNotification) {
+                            if (scrollNotification.dragDetails != null) {
+                              _isUserScrolling = true;
+                              ref.read(editorProjectProvider.notifier).setScrubbing(true);
+                            }
+                          } else if (scrollNotification is ScrollUpdateNotification) {
+                            if (_isUserScrolling) {
+                              final playheadTime = (_horizontalScrollController.offset / _timeScale).clamp(0.0, duration);
+                              ref.read(editorProjectProvider.notifier).seekPlayhead(playheadTime);
+                            }
+                          } else if (scrollNotification is ScrollEndNotification) {
+                            _isUserScrolling = false;
+                            ref.read(editorProjectProvider.notifier).setScrubbing(false);
+                          }
+                          return false;
+                        },
+                        child: SingleChildScrollView(
+                          controller: _horizontalScrollController,
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: halfWidth),
+                            child: SizedBox(
+                              width: trackWidth,
+                              child: Stack(
+                                children: [
+                                  // Tappable Seconds Ruler
+                                  Positioned(
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    height: 22,
+                                    child: GestureDetector(
+                                      onTapDown: (details) {
+                                        final playheadTime = (details.localPosition.dx / _timeScale).clamp(0.0, duration);
+                                        notifier.seekPlayhead(playheadTime);
+                                      },
+                                      child: Container(
+                                        color: const Color(0xFF14141E),
+                                        child: CustomPaint(
+                                          size: Size(trackWidth, 22),
+                                          painter: _RulerPainter(
+                                            duration: duration,
+                                            scale: _timeScale,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+
+                                  // Vertical Scrollable Tracks Container
+                                  Positioned.fill(
+                                    top: 24,
+                                    child: SingleChildScrollView(
+                                      scrollDirection: Axis.vertical,
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          // Video / Image Media Tracks Row
+                                          Container(
+                                            margin: const EdgeInsets.symmetric(vertical: 2),
+                                            height: 26,
+                                            child: Stack(
+                                              children: project.mediaLayers
+                                                  .where((m) => m.type == MediaType.video || m.type == MediaType.sticker)
+                                                  .map((media) {
+                                                final left = media.startTime * _timeScale;
+                                                final w = media.mediaDuration * _timeScale;
+                                                final isSelected = project.selectedLayerId == media.id;
+                                                return Positioned(
+                                                  left: left,
+                                                  width: w,
+                                                  top: 0,
+                                                  bottom: 0,
+                                                  child: GestureDetector(
+                                                    onTap: () => notifier.selectLayer(media.id),
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        color: isSelected ? AppTheme.primaryAccent : Colors.indigo.withOpacity(0.85),
+                                                        borderRadius: BorderRadius.circular(6),
+                                                        border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
+                                                      ),
+                                                      child: Center(
+                                                        child: Text(
+                                                          media.type == MediaType.video ? 'Video Track' : 'Photo Track',
+                                                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                              }).toList(),
                                             ),
-                                            Container(
-                                              height: 4,
-                                              width: 1,
-                                              color: Colors.white24,
+                                          ),
+
+                                          // Audio Tracks Row
+                                          Container(
+                                            margin: const EdgeInsets.symmetric(vertical: 2),
+                                            height: 22,
+                                            child: Stack(
+                                              children: project.mediaLayers
+                                                  .where((m) => m.type == MediaType.audio)
+                                                  .map((audio) {
+                                                final left = audio.startTime * _timeScale;
+                                                final w = audio.mediaDuration * _timeScale;
+                                                final isSelected = project.selectedLayerId == audio.id;
+                                                return Positioned(
+                                                  left: left,
+                                                  width: w,
+                                                  top: 0,
+                                                  bottom: 0,
+                                                  child: GestureDetector(
+                                                    onTap: () => notifier.selectLayer(audio.id),
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        color: isSelected ? AppTheme.primaryAccent : Colors.teal.shade700,
+                                                        borderRadius: BorderRadius.circular(6),
+                                                      ),
+                                                      child: const Center(
+                                                        child: Text(
+                                                          'Audio Track',
+                                                          style: TextStyle(color: Colors.white, fontSize: 10),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                              }).toList(),
                                             ),
+                                          ),
+
+                                          // Text & Auto Lyrics Tracks Row
+                                          Container(
+                                            margin: const EdgeInsets.symmetric(vertical: 2),
+                                            height: 22,
+                                            child: Stack(
+                                              children: project.textLayers.map((text) {
+                                                final left = text.startTime * _timeScale;
+                                                final w = (text.endTime - text.startTime) * _timeScale;
+                                                final isSelected = project.selectedLayerId == text.id;
+                                                return Positioned(
+                                                  left: left,
+                                                  width: w.clamp(24.0, double.infinity),
+                                                  top: 0,
+                                                  bottom: 0,
+                                                  child: GestureDetector(
+                                                    onTap: () => notifier.selectLayer(text.id),
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        color: isSelected
+                                                            ? AppTheme.primaryAccent
+                                                            : (text.isAutoLyric ? Colors.purple.shade700 : Colors.amber.shade800),
+                                                        borderRadius: BorderRadius.circular(6),
+                                                      ),
+                                                      child: Padding(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                                                        child: Center(
+                                                          child: Text(
+                                                            text.text,
+                                                            overflow: TextOverflow.ellipsis,
+                                                            style: const TextStyle(color: Colors.white, fontSize: 10),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                              }).toList(),
+                                            ),
+                                          ),
                                         ],
                                       ),
-                                    );
-                                  }),
-                                ),
-                              ),
-                            ),
-                          ),
-
-                          // Vertical Scrollable Tracks Container
-                          Positioned.fill(
-                            top: 24,
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.vertical,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Video / Image Media Tracks Row
-                                  Container(
-                                    margin: const EdgeInsets.symmetric(vertical: 2),
-                                    height: 26,
-                                    child: Stack(
-                                      children: project.mediaLayers
-                                          .where((m) => m.type == MediaType.video || m.type == MediaType.sticker)
-                                          .map((media) {
-                                        final left = media.startTime * 44;
-                                        final w = media.mediaDuration * 44;
-                                        final isSelected = project.selectedLayerId == media.id;
-                                        return Positioned(
-                                          left: left,
-                                          width: w,
-                                          top: 0,
-                                          bottom: 0,
-                                          child: GestureDetector(
-                                            onTap: () => notifier.selectLayer(media.id),
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: isSelected ? AppTheme.primaryAccent : Colors.indigo.withOpacity(0.85),
-                                                borderRadius: BorderRadius.circular(6),
-                                                border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
-                                              ),
-                                              child: Center(
-                                                child: Text(
-                                                  media.type == MediaType.video ? 'Video Track' : 'Photo Track',
-                                                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      }).toList(),
-                                    ),
-                                  ),
-
-                                  // Audio Tracks Row
-                                  Container(
-                                    margin: const EdgeInsets.symmetric(vertical: 2),
-                                    height: 22,
-                                    child: Stack(
-                                      children: project.mediaLayers
-                                          .where((m) => m.type == MediaType.audio)
-                                          .map((audio) {
-                                        final left = audio.startTime * 44;
-                                        final w = audio.mediaDuration * 44;
-                                        final isSelected = project.selectedLayerId == audio.id;
-                                        return Positioned(
-                                          left: left,
-                                          width: w,
-                                          top: 0,
-                                          bottom: 0,
-                                          child: GestureDetector(
-                                            onTap: () => notifier.selectLayer(audio.id),
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: isSelected ? AppTheme.primaryAccent : Colors.teal.shade700,
-                                                borderRadius: BorderRadius.circular(6),
-                                              ),
-                                              child: const Center(
-                                                child: Text(
-                                                  'Audio Track',
-                                                  style: TextStyle(color: Colors.white, fontSize: 10),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      }).toList(),
-                                    ),
-                                  ),
-
-                                  // Text & Auto Lyrics Tracks Row
-                                  Container(
-                                    margin: const EdgeInsets.symmetric(vertical: 2),
-                                    height: 22,
-                                    child: Stack(
-                                      children: project.textLayers.map((text) {
-                                        final left = text.startTime * 44;
-                                        final w = (text.endTime - text.startTime) * 44;
-                                        final isSelected = project.selectedLayerId == text.id;
-                                        return Positioned(
-                                          left: left,
-                                          width: w.clamp(24.0, double.infinity),
-                                          top: 0,
-                                          bottom: 0,
-                                          child: GestureDetector(
-                                            onTap: () => notifier.selectLayer(text.id),
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: isSelected
-                                                    ? AppTheme.primaryAccent
-                                                    : (text.isAutoLyric ? Colors.purple.shade700 : Colors.amber.shade800),
-                                                borderRadius: BorderRadius.circular(6),
-                                              ),
-                                              child: Padding(
-                                                padding: const EdgeInsets.symmetric(horizontal: 4),
-                                                child: Center(
-                                                  child: Text(
-                                                    text.text,
-                                                    overflow: TextOverflow.ellipsis,
-                                                    style: const TextStyle(color: Colors.white, fontSize: 10),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      }).toList(),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
                           ),
-
-                          // Red Scrub Playhead Line
-                          Positioned(
-                            left: playhead * 44,
-                            top: 0,
-                            bottom: 0,
-                            child: GestureDetector(
-                              onHorizontalDragUpdate: (details) {
-                                final newTime = (playhead + details.delta.dx / 44);
-                                notifier.seekPlayhead(newTime);
-                              },
-                              child: Container(
-                                width: 3,
-                                color: Colors.redAccent,
+                        ),
+                      ),
+                      
+                      // Fixed Center Playhead Line (Draggable)
+                      Positioned(
+                        left: halfWidth - 10, // give a bit of padding for easier grabbing
+                        top: 0,
+                        bottom: 0,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onHorizontalDragUpdate: (details) {
+                            // Moving playhead right means scrolling timeline left
+                            final maxScroll = _horizontalScrollController.position.maxScrollExtent;
+                            final newOffset = (_horizontalScrollController.offset + details.delta.dx).clamp(0.0, maxScroll);
+                            _horizontalScrollController.jumpTo(newOffset);
+                          },
+                          child: Container(
+                            width: 20,
+                            alignment: Alignment.center,
+                            child: Container(
+                              width: 3,
+                              color: Colors.redAccent,
+                              child: Column(
+                                children: [
+                                  Container(
+                                    width: 9,
+                                    height: 9,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.redAccent,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                      
+                      // Floating Time Duration over Playhead
+                      Positioned(
+                        left: halfWidth - 40,
+                        top: 2,
+                        child: IgnorePointer(
+                          child: Container(
+                            width: 80,
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryAccent,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${_formatTime(playhead)} / ${_formatTime(duration)}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                );
-              },
+                  );
+                },
               ),
             ),
           ],
@@ -381,5 +398,48 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
     final mins = (seconds / 60).floor().toString().padLeft(2, '0');
     final secs = (seconds % 60).floor().toString().padLeft(2, '0');
     return '$mins:$secs';
+  }
+}
+
+class _RulerPainter extends CustomPainter {
+  final double duration;
+  final double scale;
+
+  _RulerPainter({required this.duration, required this.scale});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final textPainter = TextPainter(textDirection: TextDirection.ltr);
+    final linePaint = Paint()
+      ..color = Colors.white24
+      ..strokeWidth = 1.0;
+
+    final step = scale > 80.0 ? 0.5 : (scale > 150.0 ? 0.1 : 1.0);
+    final totalSteps = (duration / step).ceil();
+
+    for (int i = 0; i <= totalSteps; i++) {
+      final time = i * step;
+      final x = time * scale;
+      if (x > size.width) break;
+
+      // Draw text for integer seconds (or half seconds if zoomed in)
+      if (time % 1 == 0 || scale > 80.0) {
+        textPainter.text = TextSpan(
+          text: time % 1 == 0 ? '${time.toInt().toString().padLeft(2, '0')}s' : '${time.toStringAsFixed(1)}s',
+          style: const TextStyle(color: Colors.white38, fontSize: 10),
+        );
+        textPainter.layout();
+        textPainter.paint(canvas, Offset(x - textPainter.width / 2, 0));
+        canvas.drawLine(Offset(x, 14), Offset(x, 18), linePaint);
+      } else {
+        // Draw smaller ticks
+        canvas.drawLine(Offset(x, 16), Offset(x, 18), linePaint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RulerPainter oldDelegate) {
+    return oldDelegate.duration != duration || oldDelegate.scale != scale;
   }
 }
