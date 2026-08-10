@@ -22,7 +22,7 @@ class AutoLyricItem {
 }
 
 class GroqAutoLyricsService {
-  static const String _apiUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
+  static const String _apiUrl = 'https://api.groq.com/openai/v1/audio/translations';
   
   static List<String> get _apiKeys => [
     dotenv.env['GROQ_API_KEY_1'] ?? '',
@@ -110,22 +110,52 @@ class GroqAutoLyricsService {
                 final start = (seg['start'] as num? ?? 0.0).toDouble();
                 final end = (seg['end'] as num? ?? (start + 3.0)).toDouble();
 
-                lyricLayers.add(
-                  TextLayerModel(
-                    id: uuid.v4(),
-                    text: text,
-                    position: const Offset(0.5, 0.75), // Bottom lyric area
-                    fontSize: 26.0,
-                    textColor: const Color(0xFFFFFFFF),
-                    strokeColor: const Color(0xFF000000),
-                    strokeWidth: 3.0,
-                    startTime: start,
-                    endTime: end > totalDuration ? totalDuration : end,
-                    animation: TextAnimationType.fadeIn,
-                    isAutoLyric: true,
-                    zIndex: 10 + i,
-                  ),
-                );
+                final words = text.split(RegExp(r'\s+'));
+                if (words.length <= 4) {
+                  lyricLayers.add(
+                    TextLayerModel(
+                      id: uuid.v4(),
+                      text: text,
+                      position: const Offset(0.5, 0.75), // Bottom lyric area
+                      fontSize: 26.0,
+                      textColor: const Color(0xFFFFFFFF),
+                      strokeColor: const Color(0xFF000000),
+                      strokeWidth: 3.0,
+                      startTime: start,
+                      endTime: end > totalDuration ? totalDuration : end,
+                      animation: TextAnimationType.fadeIn,
+                      isAutoLyric: true,
+                      zIndex: 10 + i,
+                    ),
+                  );
+                } else {
+                  final duration = end - start;
+                  final timePerWord = duration / words.length;
+                  
+                  for (int j = 0; j < words.length; j += 4) {
+                    final chunkWords = words.sublist(j, (j + 4 > words.length) ? words.length : j + 4);
+                    final chunkText = chunkWords.join(' ');
+                    final chunkStart = start + (j * timePerWord);
+                    final chunkEnd = chunkStart + (chunkWords.length * timePerWord);
+                    
+                    lyricLayers.add(
+                      TextLayerModel(
+                        id: uuid.v4(),
+                        text: chunkText,
+                        position: const Offset(0.5, 0.75),
+                        fontSize: 26.0,
+                        textColor: const Color(0xFFFFFFFF),
+                        strokeColor: const Color(0xFF000000),
+                        strokeWidth: 3.0,
+                        startTime: chunkStart,
+                        endTime: chunkEnd > totalDuration ? totalDuration : chunkEnd,
+                        animation: TextAnimationType.fadeIn,
+                        isAutoLyric: true,
+                        zIndex: 10 + i + j,
+                      ),
+                    );
+                  }
+                }
               }
             }
 

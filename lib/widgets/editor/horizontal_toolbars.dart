@@ -31,32 +31,7 @@ class HorizontalToolbarsWidget extends ConsumerStatefulWidget {
 
 class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWidget> {
   ToolbarCategory _activeCategory = ToolbarCategory.main;
-  String? _lastSelectedLayerId;
   bool _isAutoLyricsLoading = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // React to selection changes
-    final project = ref.watch(editorProjectProvider);
-    if (project.selectedLayerId != _lastSelectedLayerId) {
-      _lastSelectedLayerId = project.selectedLayerId;
-      if (_lastSelectedLayerId == null) {
-        _activeCategory = ToolbarCategory.main;
-      } else {
-        // Find layer type
-        if (project.textLayers.any((l) => l.id == _lastSelectedLayerId)) {
-          _activeCategory = ToolbarCategory.text;
-        } else {
-          final media = project.mediaLayers.where((m) => m.id == _lastSelectedLayerId).firstOrNull;
-          if (media != null) {
-            if (media.type == MediaType.video) _activeCategory = ToolbarCategory.video;
-            if (media.type == MediaType.audio) _activeCategory = ToolbarCategory.audio;
-          }
-        }
-      }
-    }
-  }
 
   final ImagePicker _picker = ImagePicker();
 
@@ -215,6 +190,23 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(editorProjectProvider, (previous, next) {
+      if (previous?.selectedLayerId != next.selectedLayerId) {
+        if (next.selectedLayerId == null) {
+          setState(() => _activeCategory = ToolbarCategory.main);
+        } else {
+          if (next.textLayers.any((l) => l.id == next.selectedLayerId)) {
+            setState(() => _activeCategory = ToolbarCategory.text);
+          } else {
+            final media = next.mediaLayers.where((m) => m.id == next.selectedLayerId).firstOrNull;
+            if (media != null) {
+              if (media.type == MediaType.video) setState(() => _activeCategory = ToolbarCategory.video);
+              if (media.type == MediaType.audio) setState(() => _activeCategory = ToolbarCategory.audio);
+            }
+          }
+        }
+      }
+    });
     return Container(
       height: 64,
       color: const Color(0xFF1E1E2C),
@@ -287,7 +279,12 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           _buildItem(Icons.keyboard_alt_rounded, 'Edit', () => widget.onOpenTextEditor(initialIndex: 0)),
           _buildItem(Icons.font_download_rounded, 'Font', () => widget.onOpenTextEditor(initialIndex: 2)),
           _buildItem(Icons.color_lens_rounded, 'Style', () => widget.onOpenTextEditor(initialIndex: 1)),
-          // We can add more specific text features in the future, for now they map to the text editor tabs
+          _buildItem(
+            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+            'Auto Lyrics',
+            _runAutoLyrics,
+            highlight: true,
+          ),
           _buildItem(Icons.animation_rounded, 'Animations', () {
              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Animations coming in next update!')));
           }),
@@ -295,18 +292,6 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             final project = ref.read(editorProjectProvider);
             if (project.selectedLayerId != null) {
               ref.read(editorProjectProvider.notifier).splitTextLayer(project.selectedLayerId!, project.currentPlayheadTime);
-            }
-          }),
-          _buildItem(Icons.arrow_back_ios_rounded, 'Trim Start', () {
-            final project = ref.read(editorProjectProvider);
-            if (project.selectedLayerId != null) {
-              ref.read(editorProjectProvider.notifier).trimTextLayerStart(project.selectedLayerId!, project.currentPlayheadTime);
-            }
-          }),
-          _buildItem(Icons.arrow_forward_ios_rounded, 'Trim End', () {
-            final project = ref.read(editorProjectProvider);
-            if (project.selectedLayerId != null) {
-              ref.read(editorProjectProvider.notifier).trimTextLayerEnd(project.selectedLayerId!, project.currentPlayheadTime);
             }
           }),
           _buildItem(Icons.delete_outline_rounded, 'Delete', () {
@@ -320,6 +305,12 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
       case ToolbarCategory.video:
         return [
           _buildItem(Icons.change_circle_outlined, 'Change', () => _pickVideo(replace: true)),
+          _buildItem(
+            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+            'Auto Lyrics',
+            _runAutoLyrics,
+            highlight: true,
+          ),
           _buildItem(Icons.add_to_photos_rounded, 'Add Video', () => _pickVideo(replace: false)),
           _buildItem(Icons.picture_in_picture_rounded, 'Overlay', () => _pickVideo(isOverlay: true)),
           _buildItem(Icons.library_music_rounded, 'Extract Audio', _extractAudio),
@@ -370,6 +361,12 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
       case ToolbarCategory.audio:
         return [
           _buildItem(Icons.change_circle_outlined, 'Replace', () => _pickAudio(replace: true)),
+          _buildItem(
+            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+            'Auto Lyrics',
+            _runAutoLyrics,
+            highlight: true,
+          ),
           _buildItem(Icons.audio_file_rounded, 'Add Audio', () => _pickAudio(replace: false)),
           _buildItem(Icons.content_cut_rounded, 'Split', () {
             final project = ref.read(editorProjectProvider);

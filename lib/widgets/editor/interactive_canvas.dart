@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../models/media_layer_model.dart';
+import '../../models/aspect_ratio_model.dart';
 import '../../state/editor_state_notifier.dart';
 import '../../theme/app_theme.dart';
 
@@ -141,7 +142,15 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
         final ctrl = VideoPlayerController.file(File(layer.path));
         _videoControllers[layer.id] = ctrl;
         ctrl.initialize().then((_) {
-          if (mounted) setState(() {});
+          if (mounted) {
+            final project = ref.read(editorProjectProvider);
+            // If this is the FIRST video layer, auto-adjust the aspect ratio to match the video
+            if (project.mediaLayers.where((m) => m.type == MediaType.video).firstOrNull?.id == layer.id) {
+              final customRatio = ProjectAspectRatio.createCustom(ctrl.value.size.width, ctrl.value.size.height);
+              ref.read(editorProjectProvider.notifier).setAspectRatio(customRatio);
+            }
+            setState(() {});
+          }
         });
       }
     }
@@ -319,21 +328,43 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                   onPanUpdate: (details) {
                                     final newDx = (left + details.delta.dx + (constraints.maxWidth * layer.scaleX) / 2) / constraints.maxWidth;
                                     final newDy = (top + details.delta.dy + (constraints.maxHeight * layer.scaleY) / 2) / constraints.maxHeight;
-                                    notifier.updateMediaLayerProperties(
-                                      layer.id,
-                                      startTime: layer.startTime, // dummy update to trigger position (no update method exists for position so we'd normally just copy it, but since state lacks it, we will just use updateMediaLayer replacing it)
-                                    );
-                                    
-                                    // Properly update position via updateMediaLayer
                                     notifier.updateMediaLayer(
                                       layer.copyWith(position: Offset(newDx, newDy))
                                     );
                                   },
-                                  child: Container(
-                                    decoration: isSelected
-                                        ? BoxDecoration(border: Border.all(color: AppTheme.primaryAccent, width: 2))
-                                        : null,
-                                    child: mediaWidget,
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Container(
+                                        width: double.infinity,
+                                        height: double.infinity,
+                                        decoration: isSelected
+                                            ? BoxDecoration(border: Border.all(color: AppTheme.primaryAccent, width: 2))
+                                            : null,
+                                        child: mediaWidget,
+                                      ),
+                                      if (isSelected) ...[
+                                        Positioned(
+                                          left: -12,
+                                          top: -12,
+                                          child: GestureDetector(
+                                            onTap: () => notifier.deleteMediaLayer(layer.id),
+                                            child: const CircleAvatar(radius: 10, backgroundColor: Colors.redAccent, child: Icon(Icons.close, size: 12, color: Colors.white)),
+                                          ),
+                                        ),
+                                        Positioned(
+                                          right: -12,
+                                          bottom: -12,
+                                          child: GestureDetector(
+                                            onPanUpdate: (details) {
+                                              final newScale = (layer.scaleX + (details.delta.dx + details.delta.dy) * 0.005).clamp(0.2, 5.0);
+                                              notifier.updateMediaLayer(layer.copyWith(scaleX: newScale, scaleY: newScale));
+                                            },
+                                            child: const CircleAvatar(radius: 10, backgroundColor: AppTheme.primaryAccent, child: Icon(Icons.open_with, size: 12, color: Colors.white)),
+                                          ),
+                                        ),
+                                      ]
+                                    ],
                                   ),
                                 ),
                               ),
@@ -435,9 +466,9 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                             ),
 
                                             if (isSelected) ...[
-                                              // Delete Handle
+                                              // Delete Handle (Top-Left)
                                               Positioned(
-                                                right: -12,
+                                                left: -12,
                                                 top: -12,
                                                 child: GestureDetector(
                                                   onTap: () => notifier.deleteTextLayer(textLayer.id),
@@ -449,16 +480,55 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                                 ),
                                               ),
 
-                                              // Edit Handle
+                                              // Edit Handle (Top-Right)
                                               Positioned(
-                                                left: -12,
+                                                right: -12,
                                                 top: -12,
                                                 child: GestureDetector(
-                                                  onTap: () => widget.onOpenTextEditor?.call(),
+                                                  onTap: () => widget.onOpenTextEditor?.call(initialIndex: 0),
                                                   child: const CircleAvatar(
                                                     radius: 10,
                                                     backgroundColor: AppTheme.primaryAccent,
                                                     child: Icon(Icons.edit, size: 12, color: Colors.white),
+                                                  ),
+                                                ),
+                                              ),
+                                              
+                                              // Duplicate Handle (Bottom-Left)
+                                              Positioned(
+                                                left: -12,
+                                                bottom: -12,
+                                                child: GestureDetector(
+                                                  onTap: () {
+                                                    final duplicate = textLayer.copyWith(
+                                                      id: const Uuid().v4(),
+                                                      position: Offset(textLayer.position.dx + 0.05, textLayer.position.dy + 0.05)
+                                                    );
+                                                    notifier.addTextLayers([duplicate]);
+                                                  },
+                                                  child: const CircleAvatar(
+                                                    radius: 10,
+                                                    backgroundColor: AppTheme.primaryAccent,
+                                                    child: Icon(Icons.copy, size: 12, color: Colors.white),
+                                                  ),
+                                                ),
+                                              ),
+
+                                              // Scale/Rotate Handle (Bottom-Right)
+                                              Positioned(
+                                                right: -12,
+                                                bottom: -12,
+                                                child: GestureDetector(
+                                                  onPanUpdate: (details) {
+                                                    final newScale = (textLayer.scaleX + (details.delta.dx + details.delta.dy) * 0.005).clamp(0.5, 5.0);
+                                                    notifier.updateTextLayer(
+                                                      textLayer.copyWith(scaleX: newScale, scaleY: newScale)
+                                                    );
+                                                  },
+                                                  child: const CircleAvatar(
+                                                    radius: 10,
+                                                    backgroundColor: AppTheme.primaryAccent,
+                                                    child: Icon(Icons.open_with, size: 12, color: Colors.white),
                                                   ),
                                                 ),
                                               ),

@@ -247,7 +247,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     );
   }
 
-  void updateMediaLayerProperties(String id, {double? volume, double? playbackSpeed, double? startTime, double? trimStartTime, double? mediaDuration}) {
+  void updateMediaLayerProperties(String id, {double? volume, double? playbackSpeed, double? startTime, double? trimStartTime, double? mediaDuration, bool? isMuted}) {
     pushHistory();
     state = state.copyWith(
       mediaLayers: state.mediaLayers.map((layer) {
@@ -258,6 +258,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
             startTime: startTime,
             trimStartTime: trimStartTime,
             mediaDuration: mediaDuration,
+            isMuted: isMuted,
           );
         }
         return layer;
