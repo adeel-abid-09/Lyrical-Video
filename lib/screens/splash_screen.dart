@@ -1,16 +1,21 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
+import '../services/project_storage_service.dart';
+import '../state/editor_state_notifier.dart';
 import 'main_navigation_screen.dart';
+import 'editor_screen.dart';
 
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _scaleAnim;
   late Animation<double> _fadeAnim;
@@ -37,18 +42,51 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     _animController.forward();
 
-    Timer(const Duration(seconds: 3), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => const MainNavigationScreen(),
-            transitionsBuilder: (_, anim, __, child) {
-              return FadeTransition(opacity: anim, child: child);
-            },
-          ),
-        );
+    _checkAutoRecovery();
+  }
+
+  Future<void> _checkAutoRecovery() async {
+    if (!mounted) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final activeId = prefs.getString('active_session_id');
+
+      if (activeId != null && activeId.isNotEmpty) {
+        final projects = await ProjectStorageService.loadSavedProjects();
+        final recoveredProject = projects.where((p) => p.id == activeId).firstOrNull;
+
+        if (recoveredProject != null) {
+          // Recover into provider
+          ref.read(editorProjectProvider.notifier).loadProject(recoveredProject);
+          // Clear active session to prevent looping if they discard it later
+          await prefs.remove('active_session_id');
+
+          Navigator.of(context).pushReplacement(
+            PageRouteBuilder(
+              pageBuilder: (_, __, ___) => const EditorScreen(),
+              transitionsBuilder: (_, anim, __, child) {
+                return FadeTransition(opacity: anim, child: child);
+              },
+            ),
+          );
+          return;
+        }
       }
-    });
+    } catch (_) {}
+
+    // Normal startup: wait for splash animation
+    await Future.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => const MainNavigationScreen(),
+        transitionsBuilder: (_, anim, __, child) {
+          return FadeTransition(opacity: anim, child: child);
+        },
+      ),
+    );
   }
 
   @override

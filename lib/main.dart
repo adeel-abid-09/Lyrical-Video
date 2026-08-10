@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_provider.dart';
+import 'services/project_storage_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'state/editor_state_notifier.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,11 +17,43 @@ void main() {
   );
 }
 
-class LyricalVideoApp extends ConsumerWidget {
+class LyricalVideoApp extends ConsumerStatefulWidget {
   const LyricalVideoApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LyricalVideoApp> createState() => _LyricalVideoAppState();
+}
+
+class _LyricalVideoAppState extends ConsumerState<LyricalVideoApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      // Auto-save current editor state if we are in an active project
+      final project = ref.read(editorProjectProvider);
+      // We assume if title is changed or duration changed or layers exist, it's worth saving
+      if (project.mediaLayers.isNotEmpty || project.textLayers.isNotEmpty) {
+        ProjectStorageService.saveProject(project).then((_) async {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('active_session_id', project.id);
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp(

@@ -12,6 +12,7 @@ class EditorProjectModel {
   final String? selectedLayerId;
   final double currentPlayheadTime; // Current playback position in seconds
   final bool isPlaying;
+  final bool isScrubbing;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? exportedFilePath;
@@ -26,6 +27,7 @@ class EditorProjectModel {
     this.selectedLayerId,
     this.currentPlayheadTime = 0.0,
     this.isPlaying = false,
+    this.isScrubbing = false,
     required this.createdAt,
     required this.updatedAt,
     this.exportedFilePath,
@@ -41,6 +43,7 @@ class EditorProjectModel {
     String? selectedLayerId,
     double? currentPlayheadTime,
     bool? isPlaying,
+    bool? isScrubbing,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? exportedFilePath,
@@ -55,6 +58,7 @@ class EditorProjectModel {
       selectedLayerId: selectedLayerId ?? this.selectedLayerId,
       currentPlayheadTime: currentPlayheadTime ?? this.currentPlayheadTime,
       isPlaying: isPlaying ?? this.isPlaying,
+      isScrubbing: isScrubbing ?? this.isScrubbing,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       exportedFilePath: exportedFilePath ?? this.exportedFilePath,
@@ -66,6 +70,9 @@ class EditorProjectModel {
       'id': id,
       'title': title,
       'duration': duration,
+      'currentPlayheadTime': currentPlayheadTime,
+      'isPlaying': isPlaying,
+      'isScrubbing': isScrubbing,
       'mediaLayers': mediaLayers.map((m) => m.toJson()).toList(),
       'textLayers': textLayers.map((t) => t.toJson()).toList(),
       'createdAt': createdAt.toIso8601String(),

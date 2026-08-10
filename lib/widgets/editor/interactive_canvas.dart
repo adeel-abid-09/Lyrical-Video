@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,13 +23,41 @@ class InteractiveCanvasWidget extends ConsumerStatefulWidget {
 }
 
 class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidget> {
-  VideoPlayerController? _videoController;
-  String? _activeVideoPath;
+  final Map<String, VideoPlayerController> _videoControllers = {};
+  Timer? _playbackTimer;
   final ImagePicker _picker = ImagePicker();
 
   @override
+  void initState() {
+    super.initState();
+    // A single timer ensures UI updates continuously for playback scrubbing
+    _playbackTimer = Timer.periodic(const Duration(milliseconds: 33), (timer) {
+      final project = ref.read(editorProjectProvider);
+      if (project.isPlaying) {
+        // Find the background (first) video to drive the master playhead if it's playing
+        final mainVideo = project.mediaLayers.firstWhere(
+          (m) => m.type == MediaType.video,
+          orElse: () => MediaLayerModel(id: '', path: '', type: MediaType.video, mediaDuration: 0),
+        );
+        if (mainVideo.id.isNotEmpty && _videoControllers.containsKey(mainVideo.id)) {
+          final ctrl = _videoControllers[mainVideo.id]!;
+          if (ctrl.value.isInitialized && ctrl.value.isPlaying) {
+            final pos = (ctrl.value.position.inMilliseconds / 1000.0) + mainVideo.startTime - mainVideo.trimStartTime;
+            if (!project.isScrubbing) {
+              ref.read(editorProjectProvider.notifier).seekPlayhead(pos);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  @override
   void dispose() {
-    _videoController?.dispose();
+    _playbackTimer?.cancel();
+    for (final controller in _videoControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -100,40 +129,65 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     );
   }
 
-  void _syncVideoController(String videoPath, bool isPlaying, double currentPlayheadTime) {
-    if (_activeVideoPath != videoPath) {
-      _videoController?.dispose();
-      _activeVideoPath = videoPath;
-      _videoController = VideoPlayerController.file(File(videoPath))
-        ..initialize().then((_) {
-          if (mounted) {
-            setState(() {});
-            if (isPlaying) {
-              _videoController?.play();
-            }
-          }
+  void _syncVideoControllers(List<MediaLayerModel> videoLayers, bool isPlaying, double currentPlayheadTime) {
+    // 1. Initialize any missing controllers
+    for (final layer in videoLayers) {
+      if (!_videoControllers.containsKey(layer.id)) {
+        final ctrl = VideoPlayerController.file(File(layer.path));
+        _videoControllers[layer.id] = ctrl;
+        ctrl.initialize().then((_) {
+          if (mounted) setState(() {});
         });
-      
-      _videoController!.addListener(() {
-        if (!mounted || _videoController == null) return;
-        if (_videoController!.value.isPlaying) {
-          final pos = _videoController!.value.position.inMilliseconds / 1000.0;
-          ref.read(editorProjectProvider.notifier).seekPlayhead(pos);
-        }
-      });
-      return;
+      }
     }
 
-    if (_videoController != null && _videoController!.value.isInitialized) {
-      if (isPlaying && !_videoController!.value.isPlaying) {
-        _videoController?.play();
-      } else if (!isPlaying && _videoController!.value.isPlaying) {
-        _videoController?.pause();
-      }
+    // 2. Remove obsolete controllers
+    final activeIds = videoLayers.map((l) => l.id).toSet();
+    _videoControllers.keys.where((id) => !activeIds.contains(id)).toList().forEach((id) {
+      _videoControllers[id]?.dispose();
+      _videoControllers.remove(id);
+    });
 
-      final currentPos = _videoController!.value.position.inMilliseconds / 1000.0;
-      if ((currentPos - currentPlayheadTime).abs() > 0.5) {
-        _videoController?.seekTo(Duration(milliseconds: (currentPlayheadTime * 1000).toInt()));
+    // 3. Sync states (Play/Pause, Seek, Volume)
+    for (final layer in videoLayers) {
+      final ctrl = _videoControllers[layer.id];
+      if (ctrl != null && ctrl.value.isInitialized) {
+        
+        // Calculate relative playback time for this specific layer based on project playhead
+        final layerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
+        final shouldBePlayingThisLayer = isPlaying && 
+                                         currentPlayheadTime >= layer.startTime && 
+                                         currentPlayheadTime <= layer.startTime + layer.mediaDuration;
+
+        // Sync Volume & Mute
+        final targetVolume = layer.isMuted ? 0.0 : layer.volume;
+        if (ctrl.value.volume != targetVolume) {
+          ctrl.setVolume(targetVolume);
+        }
+
+        // Sync Speed
+        if (ctrl.value.playbackSpeed != layer.playbackSpeed) {
+          ctrl.setPlaybackSpeed(layer.playbackSpeed);
+        }
+
+        // Sync Play/Pause
+        if (shouldBePlayingThisLayer && !ctrl.value.isPlaying) {
+          ctrl.play();
+        } else if (!shouldBePlayingThisLayer && ctrl.value.isPlaying) {
+          ctrl.pause();
+        }
+
+        // Sync Seek (if diff > 0.5s or if scrubbing)
+        final currentPos = ctrl.value.position.inMilliseconds / 1000.0;
+        if ((currentPos - layerTime).abs() > 0.5 || !isPlaying) {
+          // only seek if we are within bounds of this media, or if we need to reset it to trimStartTime
+          if (layerTime >= layer.trimStartTime && layerTime <= layer.trimStartTime + layer.mediaDuration) {
+             ctrl.seekTo(Duration(milliseconds: (layerTime * 1000).toInt()));
+          } else {
+             // Reset to beginning if it's outside its active window
+             ctrl.seekTo(Duration(milliseconds: (layer.trimStartTime * 1000).toInt()));
+          }
+        }
       }
     }
   }
@@ -146,9 +200,7 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     final videoLayers = project.mediaLayers.where((m) => m.type == MediaType.video).toList();
     final imageLayers = project.mediaLayers.where((m) => m.type == MediaType.sticker).toList();
 
-    if (videoLayers.isNotEmpty && videoLayers.first.isVisible) {
-      _syncVideoController(videoLayers.first.path, project.isPlaying, project.currentPlayheadTime);
-    }
+    _syncVideoControllers(videoLayers, project.isPlaying, project.currentPlayheadTime);
 
     final targetRatio = project.aspectRatio.ratio;
 
@@ -174,26 +226,8 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
               borderRadius: BorderRadius.circular(12),
               child: Stack(
                 children: [
-                  // 1. Background Video or Image Layer or Empty Picker State
-                  if (_videoController != null && _videoController!.value.isInitialized)
-                    SizedBox.expand(
-                      child: FittedBox(
-                        fit: BoxFit.cover,
-                        child: SizedBox(
-                          width: _videoController!.value.size.width,
-                          height: _videoController!.value.size.height,
-                          child: VideoPlayer(_videoController!),
-                        ),
-                      ),
-                    )
-                  else if (imageLayers.isNotEmpty && File(imageLayers.first.path).existsSync())
-                    SizedBox.expand(
-                      child: Image.file(
-                        File(imageLayers.first.path),
-                        fit: BoxFit.cover,
-                      ),
-                    )
-                  else
+                  // 1. Background / Empty Picker State
+                  if (videoLayers.isEmpty && imageLayers.isEmpty)
                     Container(
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
@@ -215,6 +249,95 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                         ),
                       ),
                     ),
+
+                  // 1.5 Media Layers (Images & Videos PIP)
+                  ...project.mediaLayers.where((m) => m.isVisible).map((layer) {
+                    final isSelected = project.selectedLayerId == layer.id;
+                    final isVisibleAtTime = project.currentPlayheadTime >= layer.startTime &&
+                        project.currentPlayheadTime <= layer.startTime + layer.mediaDuration;
+
+                    if (!isVisibleAtTime) return const SizedBox.shrink();
+
+                    Widget mediaWidget = const SizedBox.shrink();
+
+                    if (layer.type == MediaType.video) {
+                      final ctrl = _videoControllers[layer.id];
+                      if (ctrl != null && ctrl.value.isInitialized) {
+                        mediaWidget = SizedBox.expand(
+                          child: FittedBox(
+                            fit: layer.fitMode == VideoFitMode.cover ? BoxFit.cover : BoxFit.contain,
+                            child: SizedBox(
+                              width: ctrl.value.size.width,
+                              height: ctrl.value.size.height,
+                              child: VideoPlayer(ctrl),
+                            ),
+                          ),
+                        );
+                      }
+                    } else if (layer.type == MediaType.sticker) {
+                      if (File(layer.path).existsSync()) {
+                        mediaWidget = SizedBox.expand(
+                          child: Image.file(
+                            File(layer.path),
+                            fit: layer.fitMode == VideoFitMode.cover ? BoxFit.cover : BoxFit.contain,
+                          ),
+                        );
+                      }
+                    }
+
+                    // For the first layer (background), make it full screen and non-draggable
+                    final isBackground = project.mediaLayers.first.id == layer.id;
+                    if (isBackground) {
+                      return GestureDetector(
+                        onTap: () => notifier.selectLayer(layer.id),
+                        child: mediaWidget,
+                      );
+                    }
+
+                    // For PIP/Overlay layers, make them draggable
+                    return Positioned.fill(
+                      key: ValueKey(layer.id),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final left = (layer.position.dx * constraints.maxWidth - (constraints.maxWidth * layer.scaleX) / 2);
+                          final top = (layer.position.dy * constraints.maxHeight - (constraints.maxHeight * layer.scaleY) / 2);
+
+                          return Stack(
+                            children: [
+                              Positioned(
+                                left: left,
+                                top: top,
+                                width: constraints.maxWidth * layer.scaleX,
+                                height: constraints.maxHeight * layer.scaleY,
+                                child: GestureDetector(
+                                  onTap: () => notifier.selectLayer(layer.id),
+                                  onPanUpdate: (details) {
+                                    final newDx = (left + details.delta.dx + (constraints.maxWidth * layer.scaleX) / 2) / constraints.maxWidth;
+                                    final newDy = (top + details.delta.dy + (constraints.maxHeight * layer.scaleY) / 2) / constraints.maxHeight;
+                                    notifier.updateMediaLayerProperties(
+                                      layer.id,
+                                      startTime: layer.startTime, // dummy update to trigger position (no update method exists for position so we'd normally just copy it, but since state lacks it, we will just use updateMediaLayer replacing it)
+                                    );
+                                    
+                                    // Properly update position via updateMediaLayer
+                                    notifier.updateMediaLayer(
+                                      layer.copyWith(position: Offset(newDx, newDy))
+                                    );
+                                  },
+                                  child: Container(
+                                    decoration: isSelected
+                                        ? BoxDecoration(border: Border.all(color: AppTheme.primaryAccent, width: 2))
+                                        : null,
+                                    child: mediaWidget,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    );
+                  }),
 
                   // 2. Interactive Text Overlays
                   ...project.textLayers.where((t) => t.isVisible).map((textLayer) {

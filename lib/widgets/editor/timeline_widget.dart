@@ -14,6 +14,7 @@ class CapCutTimelineWidget extends ConsumerStatefulWidget {
 
 class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
   final ScrollController _horizontalScrollController = ScrollController();
+  bool _isUserScrolling = false;
 
   @override
   void dispose() {
@@ -23,6 +24,8 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
 
   void _scrollToPlayhead(double playhead, double containerWidth) {
     if (!_horizontalScrollController.hasClients) return;
+    if (_isUserScrolling) return; // Do not auto-scroll if user is panning
+
     final targetX = playhead * 44.0;
     final currentScroll = _horizontalScrollController.offset;
     final maxScroll = _horizontalScrollController.position.maxScrollExtent;
@@ -139,45 +142,77 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                 builder: (context, constraints) {
                   final trackWidth = (totalSeconds * 44.0 + 60.0).clamp(constraints.maxWidth, double.infinity);
 
-                  return SingleChildScrollView(
-                    controller: _horizontalScrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: trackWidth,
-                      child: Stack(
-                        children: [
-                          // Tappable Seconds Ruler
-                          Positioned(
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            height: 22,
-                            child: GestureDetector(
-                              onTapDown: (details) {
-                                final targetTime = (details.localPosition.dx / 44.0).clamp(0.0, duration);
-                                notifier.seekPlayhead(targetTime);
-                              },
-                              onPanUpdate: (details) {
-                                final targetTime = (details.localPosition.dx / 44.0).clamp(0.0, duration);
-                                notifier.seekPlayhead(targetTime);
-                              },
-                              child: Container(
-                                color: const Color(0xFF14141E),
-                                child: Row(
-                                  children: List.generate(totalSeconds + 1, (index) {
-                                    return SizedBox(
-                                      width: 44,
-                                      child: Column(
-                                        children: [
-                                          Text(
-                                            '${index.toString().padLeft(2, '0')}s',
-                                            style: const TextStyle(color: Colors.white38, fontSize: 10),
-                                          ),
-                                          Container(
-                                            height: 4,
-                                            width: 1,
-                                            color: Colors.white24,
-                                          ),
+                  return NotificationListener<ScrollNotification>(
+                    onNotification: (scrollNotification) {
+                      if (scrollNotification is ScrollStartNotification) {
+                        if (scrollNotification.dragDetails != null) {
+                          _isUserScrolling = true;
+                        }
+                      } else if (scrollNotification is ScrollEndNotification) {
+                        _isUserScrolling = false;
+                      }
+                      return false;
+                    },
+                    child: SingleChildScrollView(
+                      controller: _horizontalScrollController,
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        width: trackWidth,
+                        child: Stack(
+                          children: [
+                            // Tappable Seconds Ruler
+                            Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              height: 22,
+                              child: GestureDetector(
+                                onPanStart: (details) {
+                                  ref.read(editorProjectProvider.notifier).setScrubbing(true);
+                                },
+                                onPanUpdate: (details) {
+                                  final project = ref.read(editorProjectProvider);
+                                  if (!project.isScrubbing) {
+                                    ref.read(editorProjectProvider.notifier).setScrubbing(true);
+                                  }
+                                  final newScroll = (_horizontalScrollController.offset - details.delta.dx).clamp(
+                                    0.0,
+                                    _horizontalScrollController.position.maxScrollExtent,
+                                  );
+                                  _horizontalScrollController.jumpTo(newScroll);
+                                  
+                                  final playheadX = newScroll + (MediaQuery.of(context).size.width * 0.5);
+                                  final playheadTime = (playheadX / 44.0).clamp(0.0, duration);
+                                  ref.read(editorProjectProvider.notifier).seekPlayhead(playheadTime);
+                                },
+                                onPanEnd: (details) {
+                                  ref.read(editorProjectProvider.notifier).setScrubbing(false);
+                                },
+                                onPanCancel: () {
+                                  ref.read(editorProjectProvider.notifier).setScrubbing(false);
+                                },
+                                onTapDown: (details) {
+                                  // localPosition is relative to the track which has `trackWidth`
+                                  final playheadTime = (details.localPosition.dx / 44.0).clamp(0.0, duration);
+                                  notifier.seekPlayhead(playheadTime);
+                                },
+                                child: Container(
+                                  color: const Color(0xFF14141E),
+                                  child: Row(
+                                    children: List.generate(totalSeconds + 1, (index) {
+                                      return SizedBox(
+                                        width: 44,
+                                        child: Column(
+                                          children: [
+                                            Text(
+                                              '${index.toString().padLeft(2, '0')}s',
+                                              style: const TextStyle(color: Colors.white38, fontSize: 10),
+                                            ),
+                                            Container(
+                                              height: 4,
+                                              width: 1,
+                                              color: Colors.white24,
+                                            ),
                                         ],
                                       ),
                                     );
@@ -331,8 +366,9 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                         ],
                       ),
                     ),
-                  );
-                },
+                  ),
+                );
+              },
               ),
             ),
           ],
