@@ -411,6 +411,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                               ),
                             ),
                           ),
+                        ),
                       ],
                     ),
                   );
