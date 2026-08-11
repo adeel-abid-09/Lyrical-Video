@@ -26,6 +26,7 @@ class InteractiveCanvasWidget extends ConsumerStatefulWidget {
 class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidget> {
   final Map<String, VideoPlayerController> _videoControllers = {};
   Timer? _playbackTimer;
+  DateTime? _seekIgnoreTimerUntil;
   final ImagePicker _picker = ImagePicker();
 
   // For text gesture tracking
@@ -40,6 +41,11 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     _playbackTimer = Timer.periodic(const Duration(milliseconds: 33), (timer) {
       final project = ref.read(editorProjectProvider);
       if (project.isPlaying) {
+        // Skip updating playhead from controller if a manual seek (+5s/-5s) was just requested
+        if (_seekIgnoreTimerUntil != null && DateTime.now().isBefore(_seekIgnoreTimerUntil!)) {
+          return;
+        }
+
         // Find the background (first) video to drive the master playhead if it's playing
         final mainVideo = project.mediaLayers.firstWhere(
           (m) => m.type == MediaType.video,
@@ -191,9 +197,10 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
           ctrl.pause();
         }
 
-        // Sync Seek (if diff > 0.5s or if scrubbing)
+        // Sync Seek (if diff > 0.2s)
         final currentPos = ctrl.value.position.inMilliseconds / 1000.0;
-        if ((currentPos - layerTime).abs() > 0.5 || !isPlaying) {
+        if ((currentPos - layerTime).abs() > 0.2) {
+          _seekIgnoreTimerUntil = DateTime.now().add(const Duration(milliseconds: 500));
           // only seek if we are within bounds of this media, or if we need to reset it to trimStartTime
           if (layerTime >= layer.trimStartTime && layerTime <= layer.trimStartTime + layer.mediaDuration) {
              ctrl.seekTo(Duration(milliseconds: (layerTime * 1000).toInt()));
@@ -303,7 +310,8 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                     final isBackground = project.mediaLayers.first.id == layer.id;
                     if (isBackground) {
                       return GestureDetector(
-                        onTap: () => notifier.selectLayer(layer.id),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => notifier.selectLayer(null),
                         child: mediaWidget,
                       );
                     }

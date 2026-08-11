@@ -57,48 +57,83 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
         borderRadius: BorderRadius.circular(16),
         child: Column(
           children: [
-            // Playback Controls Header Row
+            // Playback Controls & Time Display Header Row
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
               height: 36,
               color: const Color(0xFF1E1E2C),
               child: Row(
                 children: [
+                  // 1. Left: Undo / Redo
                   IconButton(
                     iconSize: 18,
                     padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.undo_rounded, color: Colors.white70),
+                    constraints: const BoxConstraints(minWidth: 32),
+                    icon: Icon(Icons.undo_rounded, color: notifier.canUndo ? Colors.white70 : Colors.white24),
                     onPressed: notifier.canUndo ? () => notifier.undo() : null,
                   ),
                   IconButton(
                     iconSize: 18,
                     padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.redo_rounded, color: Colors.white70),
+                    constraints: const BoxConstraints(minWidth: 32),
+                    icon: Icon(Icons.redo_rounded, color: notifier.canRedo ? Colors.white70 : Colors.white24),
                     onPressed: notifier.canRedo ? () => notifier.redo() : null,
                   ),
+
                   const Spacer(),
-                  IconButton(
-                    iconSize: 18,
-                    padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.replay_5_rounded, color: Colors.white70),
-                    onPressed: () => notifier.seekPlayhead(playhead - 5.0),
+
+                  // 2. Center: -5s, Play/Pause, +5s
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        iconSize: 20,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32),
+                        icon: const Icon(Icons.replay_5_rounded, color: Colors.white70),
+                        onPressed: () => notifier.seekPlayhead(playhead - 5.0),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        iconSize: 28,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 36),
+                        icon: Icon(
+                          project.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
+                          color: AppTheme.primaryAccent,
+                        ),
+                        onPressed: () => notifier.togglePlayPause(),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        iconSize: 20,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32),
+                        icon: const Icon(Icons.forward_5_rounded, color: Colors.white70),
+                        onPressed: () => notifier.seekPlayhead(playhead + 5.0),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    iconSize: 26,
-                    padding: EdgeInsets.zero,
-                    icon: Icon(
-                      project.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-                      color: AppTheme.primaryAccent,
+
+                  const Spacer(),
+
+                  // 3. Right: Aligned Time Display (00:04 / 00:15)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF28283C),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white12, width: 1),
                     ),
-                    onPressed: () => notifier.togglePlayPause(),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    iconSize: 18,
-                    padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.forward_5_rounded, color: Colors.white70),
-                    onPressed: () => notifier.seekPlayhead(playhead + 5.0),
+                    child: Text(
+                      '${_formatTime(playhead)} / ${_formatTime(duration)}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -376,28 +411,6 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                               ),
                             ),
                           ),
-                        ),
-
-                        // Floating Time Duration over Playhead
-                        Positioned(
-                          left: playheadOffset - 40,
-                          top: 2,
-                          child: IgnorePointer(
-                            child: Container(
-                              width: 80,
-                              padding: const EdgeInsets.symmetric(vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryAccent,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                '${_formatTime(playhead)} / ${_formatTime(duration)}',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
-                              ),
-                            ),
-                          ),
-                        ),
                       ],
                     ),
                   );

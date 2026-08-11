@@ -109,52 +109,43 @@ class GroqAutoLyricsService {
 
                 final start = (seg['start'] as num? ?? 0.0).toDouble();
                 final end = (seg['end'] as num? ?? (start + 3.0)).toDouble();
+                final segDuration = (end > start) ? (end - start) : 3.0;
 
-                final words = text.split(RegExp(r'\s+'));
-                if (words.length <= 4) {
+                // Split segment text by sentence punctuation (. ? ! ; \n ,) into clean sentences/phrases
+                final rawLines = text
+                    .split(RegExp(r'(?<=[.?!;\n,])\s+|\n+'))
+                    .map((s) => s.trim())
+                    .where((s) => s.isNotEmpty)
+                    .toList();
+
+                final linesToProcess = rawLines.isNotEmpty ? rawLines : [text];
+                final totalChars = linesToProcess.fold<int>(0, (sum, l) => sum + l.length);
+                double currentStart = start;
+
+                for (int j = 0; j < linesToProcess.length; j++) {
+                  final lineText = linesToProcess[j];
+                  final charRatio = totalChars > 0 ? (lineText.length / totalChars) : (1.0 / linesToProcess.length);
+                  final lineDuration = (segDuration * charRatio).clamp(1.0, 10.0);
+                  final lineEnd = (currentStart + lineDuration).clamp(currentStart + 0.5, totalDuration);
+
                   lyricLayers.add(
                     TextLayerModel(
                       id: uuid.v4(),
-                      text: text,
+                      text: lineText,
                       position: const Offset(0.5, 0.75), // Bottom lyric area
                       fontSize: 26.0,
                       textColor: const Color(0xFFFFFFFF),
                       strokeColor: const Color(0xFF000000),
                       strokeWidth: 3.0,
-                      startTime: start,
-                      endTime: end > totalDuration ? totalDuration : end,
+                      startTime: currentStart,
+                      endTime: lineEnd > totalDuration ? totalDuration : lineEnd,
                       animation: TextAnimationType.fadeIn,
                       isAutoLyric: true,
-                      zIndex: 10 + i,
+                      zIndex: 10 + lyricLayers.length,
                     ),
                   );
-                } else {
-                  final duration = end - start;
-                  final timePerWord = duration / words.length;
-                  
-                  for (int j = 0; j < words.length; j += 4) {
-                    final chunkWords = words.sublist(j, (j + 4 > words.length) ? words.length : j + 4);
-                    final chunkText = chunkWords.join(' ');
-                    final chunkStart = start + (j * timePerWord);
-                    final chunkEnd = chunkStart + (chunkWords.length * timePerWord);
-                    
-                    lyricLayers.add(
-                      TextLayerModel(
-                        id: uuid.v4(),
-                        text: chunkText,
-                        position: const Offset(0.5, 0.75),
-                        fontSize: 26.0,
-                        textColor: const Color(0xFFFFFFFF),
-                        strokeColor: const Color(0xFF000000),
-                        strokeWidth: 3.0,
-                        startTime: chunkStart,
-                        endTime: chunkEnd > totalDuration ? totalDuration : chunkEnd,
-                        animation: TextAnimationType.fadeIn,
-                        isAutoLyric: true,
-                        zIndex: 10 + i + j,
-                      ),
-                    );
-                  }
+
+                  currentStart = lineEnd;
                 }
               }
             }
