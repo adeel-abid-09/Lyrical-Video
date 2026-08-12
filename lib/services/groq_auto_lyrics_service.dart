@@ -58,24 +58,29 @@ class GroqAutoLyricsService {
     bool isTempFile = false;
 
     try {
-      // If the file is a video, extract the audio first to avoid Groq's 25MB limit and format issues
-      if (audioFilePath.toLowerCase().endsWith('.mp4') || 
-          audioFilePath.toLowerCase().endsWith('.mov') || 
-          audioFilePath.toLowerCase().endsWith('.mkv')) {
-        
-        final tempDir = await getTemporaryDirectory();
-        finalUploadPath = '${tempDir.path}/extracted_audio_${const Uuid().v4()}.m4a';
-        
-        final session = await FFmpegKit.execute('-y -i "$audioFilePath" -vn -acodec aac -b:a 64k "$finalUploadPath"');
-        final returnCode = await session.getReturnCode();
-        if (returnCode == null || !returnCode.isValueSuccess()) {
-          throw Exception('Failed to extract audio from video for transcription.');
+      // Extract audio from video file to avoid Groq's 25MB limit and format issues
+      final ext = audioFilePath.toLowerCase();
+      if (ext.endsWith('.mp4') || ext.endsWith('.mov') || ext.endsWith('.mkv') || ext.endsWith('.webm') || ext.endsWith('.3gp') || ext.endsWith('.avi')) {
+        try {
+          final tempDir = await getTemporaryDirectory();
+          final tempPath = '${tempDir.path}/extracted_audio_${const Uuid().v4()}.m4a';
+          
+          final session = await FFmpegKit.execute('-y -i "$audioFilePath" -vn -acodec aac -b:a 64k "$tempPath"');
+          final returnCode = await session.getReturnCode();
+          if (returnCode != null && returnCode.isValueSuccess() && await File(tempPath).exists()) {
+            final fileLen = await File(tempPath).length();
+            if (fileLen > 0) {
+              finalUploadPath = tempPath;
+              isTempFile = true;
+            }
+          }
+        } catch (err) {
+          debugPrint('Audio extraction fallback to original file: $err');
+          finalUploadPath = audioFilePath;
         }
-        isTempFile = true;
       }
 
       final uri = Uri.parse('https://api.groq.com/openai/v1/audio/translations');
-      
       
       int maxRetries = _apiKeys.length;
       int attempts = 0;
@@ -89,6 +94,7 @@ class GroqAutoLyricsService {
           });
           request.fields['model'] = 'whisper-large-v3';
           request.fields['response_format'] = 'verbose_json';
+          // DO NOT set prompt field here -- Whisper API echoes prompt text as the first transcript line if set.
           request.files.add(await http.MultipartFile.fromPath('file', finalUploadPath));
 
           final streamedResponse = await request.send();
@@ -97,6 +103,7 @@ class GroqAutoLyricsService {
           if (response.statusCode == 200) {
             final data = jsonDecode(response.body);
             final segments = data['segments'] as List<dynamic>? ?? [];
+            final fullText = (data['text'] as String? ?? '').trim();
 
             final List<TextLayerModel> lyricLayers = [];
             final uuid = const Uuid();
@@ -106,6 +113,18 @@ class GroqAutoLyricsService {
                 final seg = segments[i];
                 final text = (seg['text'] as String? ?? '').trim();
                 if (text.isEmpty) continue;
+
+                // Ignore prompt echoes or instruction metadata
+                final lowerText = text.toLowerCase();
+                if (lowerText.contains('transcribe') ||
+                    lowerText.contains('translating') ||
+                    lowerText.contains('translated') ||
+                    lowerText.contains('spoken lyrics') ||
+                    lowerText.contains('song lyrics') ||
+                    lowerText.contains('clear, accurate') ||
+                    lowerText.contains('line by line')) {
+                  continue;
+                }
 
                 final start = (seg['start'] as num? ?? 0.0).toDouble();
                 final end = (seg['end'] as num? ?? (start + 3.0)).toDouble();
@@ -128,10 +147,13 @@ class GroqAutoLyricsService {
                   final lineDuration = (segDuration * charRatio).clamp(1.0, 10.0);
                   final lineEnd = (currentStart + lineDuration).clamp(currentStart + 0.5, totalDuration);
 
+                  // Refine translation to 100% pure, accurate English using Groq LLaMA 3.3 70B
+                  final refinedEnglishLine = await _refineToEnglish(lineText, apiKey);
+
                   lyricLayers.add(
                     TextLayerModel(
                       id: uuid.v4(),
-                      text: lineText,
+                      text: refinedEnglishLine,
                       position: const Offset(0.5, 0.75), // Bottom lyric area
                       fontSize: 26.0,
                       textColor: const Color(0xFFFFFFFF),
@@ -148,12 +170,44 @@ class GroqAutoLyricsService {
                   currentStart = lineEnd;
                 }
               }
+            } else if (fullText.isNotEmpty) {
+              // Fallback: If segments array is empty, parse full text string line by line
+              final lines = fullText
+                  .split(RegExp(r'(?<=[.?!;\n,])\s+|\n+'))
+                  .map((s) => s.trim())
+                  .where((s) => s.isNotEmpty)
+                  .toList();
+
+              if (lines.isNotEmpty) {
+                final timePerLine = totalDuration / lines.length;
+                for (int k = 0; k < lines.length; k++) {
+                  final lStart = k * timePerLine;
+                  final lEnd = (lStart + timePerLine).clamp(lStart + 1.0, totalDuration);
+                  final refinedText = await _refineToEnglish(lines[k], apiKey);
+                  lyricLayers.add(
+                    TextLayerModel(
+                      id: uuid.v4(),
+                      text: refinedText,
+                      position: const Offset(0.5, 0.75),
+                      fontSize: 26.0,
+                      textColor: const Color(0xFFFFFFFF),
+                      strokeColor: const Color(0xFF000000),
+                      strokeWidth: 3.0,
+                      startTime: lStart,
+                      endTime: lEnd,
+                      animation: TextAnimationType.fadeIn,
+                      isAutoLyric: true,
+                      zIndex: 10 + k,
+                    ),
+                  );
+                }
+              }
             }
 
             if (lyricLayers.isNotEmpty) {
               return lyricLayers;
             }
-            throw Exception('No lyrics returned by Groq API');
+            throw Exception('No spoken lyrics found in this video audio.');
           } else if (response.statusCode == 401 || response.statusCode == 429) {
             // API key expired or rate limited. Fallback to next key.
             debugPrint('Groq API Key failed with status ${response.statusCode}. Trying next key...');
@@ -185,5 +239,47 @@ class GroqAutoLyricsService {
         } catch (_) {}
       }
     }
+  }
+
+  /// Refines raw Whisper transcript text into 100% pure, accurate English lyrics using Groq LLaMA 3.3 70B
+  static Future<String> _refineToEnglish(String inputText, String apiKey) async {
+    final trimmed = inputText.trim();
+    if (trimmed.isEmpty) return trimmed;
+
+    try {
+      final response = await http.post(
+        Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
+        headers: {
+          'Authorization': 'Bearer $apiKey',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'model': 'llama-3.3-70b-versatile',
+          'messages': [
+            {
+              'role': 'system',
+              'content': 'You are an expert lyric translator. Translate the given song/poetry lyrics (which may be in Urdu script, Roman Urdu, or Hindi) into 100% fluent, accurate, beautiful English. Do NOT output Roman Urdu, Urdu script, or explanations. Output ONLY the clean English translation.'
+            },
+            {
+              'role': 'user',
+              'content': trimmed,
+            }
+          ],
+          'temperature': 0.1,
+        }),
+      ).timeout(const Duration(seconds: 3));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final translated = (data['choices'][0]['message']['content'] as String? ?? '').trim();
+        if (translated.isNotEmpty) {
+          // Remove extraneous quotation marks if present
+          return translated.replaceAll(RegExp(r'^"|"$'), '');
+        }
+      }
+    } catch (e) {
+      debugPrint('Groq LLaMA translation refinement fallback: $e');
+    }
+    return trimmed;
   }
 }

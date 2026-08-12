@@ -40,7 +40,7 @@ class _TextEditingSheetWidgetState extends ConsumerState<TextEditingSheetWidget>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this, initialIndex: widget.initialIndex);
+    _tabController = TabController(length: 6, vsync: this, initialIndex: widget.initialIndex);
     final project = ref.read(editorProjectProvider);
     final selectedId = project.selectedLayerId;
 
@@ -99,129 +99,176 @@ class _TextEditingSheetWidgetState extends ConsumerState<TextEditingSheetWidget>
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.6,
+      height: MediaQuery.of(context).size.height * 0.55,
       padding: EdgeInsets.only(
-        top: 16,
+        top: 8,
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       decoration: const BoxDecoration(
-        color: Color(0xFF1E1E2C),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        color: Color(0xFF18181C), // Darker background matching screenshot
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         children: [
+          // Drag Handle
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          
+          // TextField Area
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: const Text('Cancel', style: TextStyle(color: Colors.white54, fontSize: 16)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryAccent,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    minimumSize: const Size(60, 32),
-                  ),
-                  onPressed: () {
-                    _saveText();
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Done', style: TextStyle(color: Colors.white)),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          TabBar(
-            controller: _tabController,
-            indicatorColor: AppTheme.primaryAccent,
-            labelColor: AppTheme.primaryAccent,
-            unselectedLabelColor: Colors.white54,
-            tabs: const [
-              Tab(text: 'Keyboard'),
-              Tab(text: 'Style'),
-              Tab(text: 'Font'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                // TAB 1: Keyboard
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: TextField(
-                    controller: _textController,
-                    autofocus: widget.initialIndex == 0,
-                    maxLines: null,
-                    textAlign: TextAlign.center,
-                    onChanged: (_) => _saveText(),
-                    style: TextStyle(color: _selectedColor, fontSize: _fontSize, fontFamily: _fontFamily),
-                    decoration: InputDecoration(
-                      hintText: 'Enter text here...',
-                      hintStyle: const TextStyle(color: Colors.white38),
-                      filled: true,
-                      fillColor: const Color(0xFF28283C),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                Expanded(
+                  child: Container(
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2C2C34),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _textController,
+                            autofocus: true,
+                            onChanged: (_) => _saveText(),
+                            cursorColor: const Color(0xFF00E5FF),
+                            style: const TextStyle(color: Colors.white, fontSize: 16),
+                            decoration: const InputDecoration(
+                              hintText: 'Enter text',
+                              hintStyle: TextStyle(color: Colors.white38, fontSize: 16),
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.open_in_full_rounded, color: Colors.white70, size: 20),
+                          onPressed: () {},
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                
-                // TAB 2: Style
-                SingleChildScrollView(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Text Color', style: TextStyle(color: Colors.white70)),
-                      const SizedBox(height: 8),
-                      _buildColorPalette(_selectedColor, (c) { setState(() => _selectedColor = c); _saveText(); }),
-                      const SizedBox(height: 16),
-                      const Text('Stroke Color', style: TextStyle(color: Colors.white70)),
-                      const SizedBox(height: 8),
-                      _buildColorPalette(_selectedStrokeColor, (c) { setState(() => _selectedStrokeColor = c); _saveText(); }),
-                      const SizedBox(height: 16),
-                      const Text('Background Color', style: TextStyle(color: Colors.white70)),
-                      const SizedBox(height: 8),
-                      _buildColorPalette(_selectedBackgroundColor, (c) { setState(() => _selectedBackgroundColor = c); _saveText(); }),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          const Text('Size', style: TextStyle(color: Colors.white70)),
-                          Expanded(
-                            child: Slider(
-                              value: _fontSize,
-                              min: 10, max: 80,
-                              activeColor: AppTheme.primaryAccent,
-                              onChanged: (val) { setState(() => _fontSize = val); _saveText(); },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                
-                // TAB 3: Font
-                ListView.builder(
-                  itemCount: _fonts.length,
-                  itemBuilder: (context, index) {
-                    final font = _fonts[index];
-                    final isSelected = _fontFamily == font;
-                    return ListTile(
-                      title: Text(font, style: TextStyle(color: isSelected ? AppTheme.primaryAccent : Colors.white, fontFamily: font, fontSize: 18)),
-                      trailing: isSelected ? const Icon(Icons.check, color: AppTheme.primaryAccent) : null,
-                      onTap: () {
-                        setState(() => _fontFamily = font);
-                        _saveText();
-                      },
-                    );
-                  },
-                ),
+                const SizedBox(width: 12),
+                const Icon(Icons.subtitles_outlined, color: Colors.white70, size: 26),
               ],
+            ),
+          ),
+          
+          const SizedBox(height: 12),
+          
+          // Tab Bar
+          TabBar(
+            controller: _tabController,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            indicatorColor: const Color(0xFF00E5FF),
+            indicatorWeight: 3,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white54,
+            labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 14),
+            dividerColor: Colors.transparent,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            tabs: const [
+              Tab(text: 'Templates'),
+              Tab(text: 'Fonts'),
+              Tab(text: 'Styles'),
+              Tab(text: 'Effects'),
+              Tab(text: 'Animations'),
+              Tab(text: 'Bubbles'),
+            ],
+          ),
+          
+          // Tab Content
+          Expanded(
+            child: Container(
+              color: const Color(0xFF111114), // Slightly darker for content area
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  // 1: Templates (Placeholder)
+                  const Center(child: Text('Templates coming soon', style: TextStyle(color: Colors.white54))),
+                  
+                  // 2: Fonts
+                  ListView.builder(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: _fonts.length,
+                    itemBuilder: (context, index) {
+                      final font = _fonts[index];
+                      final isSelected = _fontFamily == font;
+                      return ListTile(
+                        dense: true,
+                        title: Text(font, style: TextStyle(color: isSelected ? const Color(0xFF00E5FF) : Colors.white, fontFamily: font, fontSize: 18)),
+                        trailing: isSelected ? const Icon(Icons.check, color: Color(0xFF00E5FF), size: 20) : null,
+                        onTap: () {
+                          setState(() => _fontFamily = font);
+                          _saveText();
+                        },
+                      );
+                    },
+                  ),
+                  
+                  // 3: Styles
+                  SingleChildScrollView(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Text Color', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 12),
+                        _buildColorPalette(_selectedColor, (c) { setState(() => _selectedColor = c); _saveText(); }),
+                        const SizedBox(height: 20),
+                        
+                        const Text('Stroke Color', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 12),
+                        _buildColorPalette(_selectedStrokeColor, (c) { setState(() => _selectedStrokeColor = c); _saveText(); }),
+                        const SizedBox(height: 20),
+                        
+                        const Text('Background Color', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 12),
+                        _buildColorPalette(_selectedBackgroundColor, (c) { setState(() => _selectedBackgroundColor = c); _saveText(); }),
+                        const SizedBox(height: 20),
+                        
+                        Row(
+                          children: [
+                            const Text('Size', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Slider(
+                                value: _fontSize,
+                                min: 10, max: 100,
+                                activeColor: const Color(0xFF00E5FF),
+                                inactiveColor: Colors.white24,
+                                onChanged: (val) { setState(() => _fontSize = val); _saveText(); },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  // 4: Effects
+                  const Center(child: Text('Effects coming soon', style: TextStyle(color: Colors.white54))),
+                  // 5: Animations
+                  const Center(child: Text('Animations coming soon', style: TextStyle(color: Colors.white54))),
+                  // 6: Bubbles
+                  const Center(child: Text('Bubbles coming soon', style: TextStyle(color: Colors.white54))),
+                ],
+              ),
             ),
           ),
         ],

@@ -68,6 +68,19 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     state = project;
   }
 
+  void resetProject() {
+    _undoStack.clear();
+    _redoStack.clear();
+    state = EditorProjectModel(
+      id: const Uuid().v4(),
+      title: 'New Lyrical Project',
+      aspectRatio: ProjectAspectRatio.default9x16,
+      duration: 15.0,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+  }
+
   void setAspectRatio(ProjectAspectRatio ratio) {
     pushHistory();
     state = state.copyWith(

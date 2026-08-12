@@ -119,19 +119,23 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
 
                   // 3. Right: Aligned Time Display (00:04 / 00:15)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    constraints: const BoxConstraints(minWidth: 84),
                     decoration: BoxDecoration(
                       color: const Color(0xFF28283C),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: Colors.white12, width: 1),
                     ),
-                    child: Text(
-                      '${_formatTime(playhead)} / ${_formatTime(duration)}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'monospace',
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '${_formatTime(playhead)} / ${_formatTime(duration)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                        ),
                       ),
                     ),
                   ),

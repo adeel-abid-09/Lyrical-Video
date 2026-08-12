@@ -446,12 +446,12 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                     child: Transform.scale(
                                       scale: textLayer.scaleX,
                                       child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                         decoration: BoxDecoration(
                                           border: isSelected
-                                              ? Border.all(color: AppTheme.primaryAccent, width: 2)
+                                              ? Border.all(color: Colors.white, width: 1.2)
                                               : null,
-                                          borderRadius: BorderRadius.circular(8),
+                                          borderRadius: BorderRadius.circular(4),
                                         ),
                                         child: Stack(
                                           clipBehavior: Clip.none,
@@ -474,69 +474,89 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                             ),
 
                                             if (isSelected) ...[
-                                              // Delete Handle (Top-Left)
+                                              // Top-Left: Delete Handle (X)
                                               Positioned(
-                                                left: -12,
-                                                top: -12,
+                                                left: -20,
+                                                top: -16,
                                                 child: GestureDetector(
                                                   onTap: () => notifier.deleteTextLayer(textLayer.id),
-                                                  child: const CircleAvatar(
-                                                    radius: 10,
-                                                    backgroundColor: Colors.redAccent,
-                                                    child: Icon(Icons.close, size: 12, color: Colors.white),
+                                                  child: Container(
+                                                    width: 26,
+                                                    height: 26,
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(0xFF14141E),
+                                                      shape: BoxShape.circle,
+                                                      border: Border.all(color: Colors.white70, width: 1.2),
+                                                    ),
+                                                    child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
                                                   ),
                                                 ),
                                               ),
 
-                                              // Edit Handle (Top-Right)
+                                              // Top-Right: Edit Handle (Pencil)
                                               Positioned(
-                                                right: -12,
-                                                top: -12,
+                                                right: -20,
+                                                top: -16,
                                                 child: GestureDetector(
                                                   onTap: () => widget.onOpenTextEditor?.call(initialIndex: 0),
-                                                  child: const CircleAvatar(
-                                                    radius: 10,
-                                                    backgroundColor: AppTheme.primaryAccent,
-                                                    child: Icon(Icons.edit, size: 12, color: Colors.white),
+                                                  child: Container(
+                                                    width: 26,
+                                                    height: 26,
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(0xFF14141E),
+                                                      shape: BoxShape.circle,
+                                                      border: Border.all(color: Colors.white70, width: 1.2),
+                                                    ),
+                                                    child: const Icon(Icons.edit_rounded, size: 13, color: Colors.white),
                                                   ),
                                                 ),
                                               ),
                                               
-                                              // Duplicate Handle (Bottom-Left)
+                                              // Bottom-Left: Duplicate Handle (Copy)
                                               Positioned(
-                                                left: -12,
-                                                bottom: -12,
+                                                left: -20,
+                                                bottom: -16,
                                                 child: GestureDetector(
                                                   onTap: () {
                                                     final duplicate = textLayer.copyWith(
                                                       id: const Uuid().v4(),
-                                                      position: Offset(textLayer.position.dx + 0.05, textLayer.position.dy + 0.05)
+                                                      position: Offset(textLayer.position.dx + 0.04, textLayer.position.dy + 0.04),
                                                     );
                                                     notifier.addTextLayers([duplicate]);
                                                   },
-                                                  child: const CircleAvatar(
-                                                    radius: 10,
-                                                    backgroundColor: AppTheme.primaryAccent,
-                                                    child: Icon(Icons.copy, size: 12, color: Colors.white),
+                                                  child: Container(
+                                                    width: 26,
+                                                    height: 26,
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(0xFF14141E),
+                                                      shape: BoxShape.circle,
+                                                      border: Border.all(color: Colors.white70, width: 1.2),
+                                                    ),
+                                                    child: const Icon(Icons.copy_rounded, size: 13, color: Colors.white),
                                                   ),
                                                 ),
                                               ),
 
-                                              // Scale/Rotate Handle (Bottom-Right)
+                                              // Bottom-Right: Scale/Rotate Handle (Refresh / Rotate Arrows)
                                               Positioned(
-                                                right: -12,
-                                                bottom: -12,
+                                                right: -20,
+                                                bottom: -16,
                                                 child: GestureDetector(
                                                   onPanUpdate: (details) {
-                                                    final newScale = (textLayer.scaleX + (details.delta.dx + details.delta.dy) * 0.005).clamp(0.5, 5.0);
+                                                    final newScale = (textLayer.scaleX + (details.delta.dx + details.delta.dy) * 0.005).clamp(0.4, 5.0);
                                                     notifier.updateTextLayer(
-                                                      textLayer.copyWith(scaleX: newScale, scaleY: newScale)
+                                                      textLayer.copyWith(scaleX: newScale, scaleY: newScale),
                                                     );
                                                   },
-                                                  child: const CircleAvatar(
-                                                    radius: 10,
-                                                    backgroundColor: AppTheme.primaryAccent,
-                                                    child: Icon(Icons.open_with, size: 12, color: Colors.white),
+                                                  child: Container(
+                                                    width: 26,
+                                                    height: 26,
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(0xFF14141E),
+                                                      shape: BoxShape.circle,
+                                                      border: Border.all(color: Colors.white70, width: 1.2),
+                                                    ),
+                                                    child: const Icon(Icons.sync_rounded, size: 14, color: Colors.white),
                                                   ),
                                                 ),
                                               ),

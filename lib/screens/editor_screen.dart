@@ -88,13 +88,10 @@ class EditorScreen extends ConsumerWidget {
         if (didPop) return;
         final shouldPop = await _onWillPop(context, ref);
         if (shouldPop && context.mounted) {
-          if (Navigator.canPop(context)) {
-            Navigator.of(context).pop();
-          } else {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
-            );
-          }
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+            (route) => false,
+          );
         }
       },
       child: Scaffold(
@@ -104,13 +101,10 @@ class EditorScreen extends ConsumerWidget {
             onPressed: () async {
               final shouldPop = await _onWillPop(context, ref);
               if (shouldPop && context.mounted) {
-                if (Navigator.canPop(context)) {
-                  Navigator.of(context).pop();
-                } else {
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
-                  );
-                }
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+                  (route) => false,
+                );
               }
             },
           ),

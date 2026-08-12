@@ -89,6 +89,7 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> {
         backgroundColor: isDark ? const Color(0xFF1E1E2C) : Colors.white,
         onTap: (index) {
           if (index == 2) {
+            ref.read(editorProjectProvider.notifier).resetProject();
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AspectRatioScreen()),
             ).then((_) => _loadProjects());
@@ -120,6 +121,7 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> {
         // Hero Creation Banner
         GestureDetector(
           onTap: () {
+            ref.read(editorProjectProvider.notifier).resetProject();
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AspectRatioScreen()),
             ).then((_) => _loadProjects());
@@ -218,7 +220,7 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> {
                   },
                 ),
                 onTap: () {
-                  ref.read(editorProjectProvider.notifier).setAspectRatio(p.aspectRatio);
+                  ref.read(editorProjectProvider.notifier).loadProject(p);
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const EditorScreen()),
                   ).then((_) => _loadProjects());
@@ -269,7 +271,7 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> {
                   },
                 ),
                 onTap: () {
-                  ref.read(editorProjectProvider.notifier).setAspectRatio(p.aspectRatio);
+                  ref.read(editorProjectProvider.notifier).loadProject(p);
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const EditorScreen()),
                   ).then((_) => _loadProjects());

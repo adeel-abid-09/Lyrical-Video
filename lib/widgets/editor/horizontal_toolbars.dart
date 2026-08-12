@@ -9,7 +9,7 @@ import '../../services/groq_auto_lyrics_service.dart';
 import '../../state/editor_state_notifier.dart';
 import '../../theme/app_theme.dart';
 
-enum ToolbarCategory { main, text, audio, video, stickers, ratio }
+enum ToolbarCategory { main, text, textStyle, audio, video, stickers, ratio }
 
 class HorizontalToolbarsWidget extends ConsumerStatefulWidget {
   final void Function({int initialIndex}) onOpenTextEditor;
@@ -34,6 +34,18 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
   bool _isAutoLyricsLoading = false;
 
   final ImagePicker _picker = ImagePicker();
+
+  static const List<Color> _presetColors = [
+    Colors.white,
+    Color(0xFFFFD700), // Gold/Yellow
+    Color(0xFFFF3B30), // Red
+    Color(0xFF34C759), // Green
+    Color(0xFF007AFF), // Blue
+    Color(0xFFAF52DE), // Purple
+    Color(0xFFFF9500), // Orange
+    Color(0xFFFF2D55), // Pink
+    Colors.black,
+  ];
 
   Future<void> _pickVideo({bool replace = false, bool isOverlay = false}) async {
     final XFile? file = await _picker.pickVideo(source: ImageSource.gallery);
@@ -87,8 +99,6 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     final layer = project.mediaLayers.firstWhere((l) => l.id == project.selectedLayerId);
     if (layer.type != MediaType.video) return;
 
-    // Fast extraction without ffmpeg wait for now, we pass the video path as audio, 
-    // VideoPlayer handles audio playback perfectly fine, we just add it as an audio track!
     ref.read(editorProjectProvider.notifier).extractAudio(layer.id, layer.path, layer.mediaDuration);
     
     ScaffoldMessenger.of(context).showSnackBar(
@@ -170,7 +180,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Generated ${lyrics.length} auto-lyric lines!')),
+          SnackBar(content: Text('Generated ${lyrics.length} English auto-lyric lines!')),
         );
       }
     } catch (e) {
@@ -207,39 +217,40 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         }
       }
     });
+
     return Container(
-      height: 64,
-      color: const Color(0xFF1E1E2C),
-      child: Column(
+      height: 60,
+      color: const Color(0xFF14141E),
+      child: Row(
         children: [
+          // Fixed Left Back Arrow [ < ] matching CapCut design
           if (_activeCategory != ToolbarCategory.main)
-            Container(
-              height: 20,
-              color: const Color(0xFF14141E),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () {
-                      ref.read(editorProjectProvider.notifier).selectLayer(null);
-                      setState(() => _activeCategory = ToolbarCategory.main);
-                    },
-                    child: const Row(
-                      children: [
-                        Icon(Icons.arrow_back_ios_new_rounded, size: 10, color: AppTheme.primaryAccent),
-                        SizedBox(width: 4),
-                        Text('Main Toolbar', style: TextStyle(color: AppTheme.primaryAccent, fontSize: 10)),
-                      ],
-                    ),
-                  ),
-                ],
+            GestureDetector(
+              onTap: () {
+                if (_activeCategory == ToolbarCategory.textStyle) {
+                  setState(() => _activeCategory = ToolbarCategory.text);
+                } else {
+                  ref.read(editorProjectProvider.notifier).selectLayer(null);
+                  setState(() => _activeCategory = ToolbarCategory.main);
+                }
+              },
+              child: Container(
+                width: 48,
+                height: 60,
+                margin: const EdgeInsets.only(right: 4),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF222232),
+                  border: Border(right: BorderSide(color: Colors.white10, width: 1)),
+                ),
+                child: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 16),
               ),
             ),
 
+          // Horizontal Scrollable Action Items / Inline Sub-menus
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(
                 children: _buildActiveToolbarItems(),
               ),
@@ -254,15 +265,12 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     switch (_activeCategory) {
       case ToolbarCategory.main:
         return [
-          _buildItem(Icons.text_fields_rounded, 'Text', () {
+          _buildItem(Icons.text_fields_rounded, 'Add text', () {
+            ref.read(editorProjectProvider.notifier).addTextLayer('Enter Text');
             setState(() => _activeCategory = ToolbarCategory.text);
           }),
-          _buildItem(Icons.audiotrack_rounded, 'Audio', () {
-            _pickAudio();
-          }),
-          _buildItem(Icons.video_library_rounded, 'Video', () {
-            _pickVideo();
-          }),
+          _buildItem(Icons.audiotrack_rounded, 'Audio', () => _pickAudio()),
+          _buildItem(Icons.video_library_rounded, 'Video', () => _pickVideo()),
           _buildItem(Icons.layers_rounded, 'Layers', widget.onOpenLayersPanel),
           _buildItem(
             _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
@@ -276,17 +284,8 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
 
       case ToolbarCategory.text:
         return [
-          _buildItem(Icons.keyboard_alt_rounded, 'Edit', () => widget.onOpenTextEditor(initialIndex: 0)),
-          _buildItem(Icons.font_download_rounded, 'Font', () => widget.onOpenTextEditor(initialIndex: 2)),
-          _buildItem(Icons.color_lens_rounded, 'Style', () => widget.onOpenTextEditor(initialIndex: 1)),
-          _buildItem(
-            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
-            'Auto Lyrics',
-            _runAutoLyrics,
-            highlight: true,
-          ),
-          _buildItem(Icons.animation_rounded, 'Animations', () {
-             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Animations coming in next update!')));
+          _buildItem(Icons.text_fields_rounded, 'Add text', () {
+            ref.read(editorProjectProvider.notifier).addTextLayer('Enter Text');
           }),
           _buildItem(Icons.content_cut_rounded, 'Split', () {
             final project = ref.read(editorProjectProvider);
@@ -294,12 +293,73 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               ref.read(editorProjectProvider.notifier).splitTextLayer(project.selectedLayerId!, project.currentPlayheadTime);
             }
           }),
+          _buildItem(Icons.style_rounded, 'Style', () {
+            setState(() => _activeCategory = ToolbarCategory.textStyle);
+          }),
+          _buildItem(Icons.edit_rounded, 'Edit', () => widget.onOpenTextEditor(initialIndex: 0)),
+          _buildItem(Icons.font_download_rounded, 'Font', () => widget.onOpenTextEditor(initialIndex: 2)),
+          _buildItem(Icons.animation_rounded, 'Animations', () {
+             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Animations coming in next update!')));
+          }),
           _buildItem(Icons.delete_outline_rounded, 'Delete', () {
             final project = ref.read(editorProjectProvider);
             if (project.selectedLayerId != null) {
               ref.read(editorProjectProvider.notifier).deleteTextLayer(project.selectedLayerId!);
             }
           }),
+          _buildItem(Icons.copy_rounded, 'Duplicate', () {
+            final project = ref.read(editorProjectProvider);
+            if (project.selectedLayerId != null) {
+              final layerIndex = project.textLayers.indexWhere((l) => l.id == project.selectedLayerId);
+              if (layerIndex != -1) {
+                final textLayer = project.textLayers[layerIndex];
+                final duplicate = textLayer.copyWith(
+                  id: const Uuid().v4(),
+                  position: Offset(textLayer.position.dx + 0.04, textLayer.position.dy + 0.04),
+                );
+                ref.read(editorProjectProvider.notifier).addTextLayers([duplicate]);
+              }
+            }
+          }),
+          _buildItem(
+            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+            'Auto Lyrics',
+            _runAutoLyrics,
+            highlight: true,
+          ),
+        ];
+
+      case ToolbarCategory.textStyle:
+        final project = ref.watch(editorProjectProvider);
+        final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+
+        return [
+          // Inline Horizontal Color Swatches
+          ..._presetColors.map((color) {
+            final isSelected = selectedText?.textColor == color;
+            return GestureDetector(
+              onTap: () {
+                if (selectedText != null) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(textColor: color));
+                }
+              },
+              child: Container(
+                width: 32,
+                height: 32,
+                margin: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isSelected ? AppTheme.primaryAccent : Colors.white54,
+                    width: isSelected ? 2.5 : 1,
+                  ),
+                ),
+              ),
+            );
+          }),
+          const SizedBox(width: 8),
+          _buildItem(Icons.edit_rounded, 'More Style', () => widget.onOpenTextEditor(initialIndex: 1)),
         ];
 
       case ToolbarCategory.video:
