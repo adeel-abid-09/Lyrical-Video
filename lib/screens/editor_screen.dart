@@ -88,9 +88,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     );
 
     if (shouldSave == true) {
-      await ProjectStorageService.saveProject(ref.read(editorProjectProvider));
+      await ref.read(editorProjectProvider.notifier).saveAsDraft();
       return true;
     } else if (shouldSave == false) {
+      await ref.read(editorProjectProvider.notifier).discardSession();
       return true;
     }
     return false; // Cancel

@@ -44,10 +44,13 @@ class LyricalVideoApp extends ConsumerStatefulWidget {
 }
 
 class _LyricalVideoAppState extends ConsumerState<LyricalVideoApp> with WidgetsBindingObserver {
+  late Future<void> _initializationFuture;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initializationFuture = _loadActiveProject();
   }
 
   @override
@@ -86,7 +89,7 @@ class _LyricalVideoAppState extends ConsumerState<LyricalVideoApp> with WidgetsB
       home: initialRoute == 'splash'
           ? const SplashScreen()
           : FutureBuilder(
-              future: _loadActiveProject(),
+              future: _initializationFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Scaffold(

@@ -30,6 +30,9 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   final List<EditorProjectModel> _undoStack = [];
   final List<EditorProjectModel> _redoStack = [];
   Timer? _autoSaveTimer;
+  
+  bool _isNewProject = true;
+  EditorProjectModel? _originalProjectData;
 
   bool get canUndo => _undoStack.isNotEmpty;
   bool get canRedo => _redoStack.isNotEmpty;
@@ -78,9 +81,42 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void loadProject(EditorProjectModel project) {
+    _isNewProject = false;
+    _originalProjectData = project;
+    state = project;
     _undoStack.clear();
     _redoStack.clear();
-    state = project;
+  }
+
+  Future<void> discardSession() async {
+    _autoSaveTimer?.cancel();
+    if (_isNewProject) {
+      await ProjectStorageService.deleteProject(state.id);
+    } else if (_originalProjectData != null) {
+      await ProjectStorageService.saveProject(_originalProjectData!);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('active_session_id');
+  }
+
+  Future<void> saveAsDraft() async {
+    _autoSaveTimer?.cancel();
+    await ProjectStorageService.saveProject(state);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('active_session_id');
+  }
+
+  void updateProjectConfig({
+    String? title,
+    ProjectAspectRatio? aspectRatio,
+    double? duration,
+  }) {
+    pushHistory();
+    state = state.copyWith(
+      title: title,
+      aspectRatio: aspectRatio,
+      duration: duration,
+    );
   }
 
   void resetProject() {

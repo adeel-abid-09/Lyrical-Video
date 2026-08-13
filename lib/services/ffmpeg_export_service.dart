@@ -3,8 +3,9 @@ import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-
 import '../models/editor_project_model.dart';
 import '../models/media_layer_model.dart';
 import '../models/text_layer_model.dart';
@@ -94,9 +95,9 @@ class FFmpegExportService {
       // simple normalized positioning for sticker
       final dx = sticker.position.dx;
       final dy = sticker.position.dy;
-      // sticker x = (W-w)*dx, y = (H-h)*dy
-      final xExpr = '(W-w)*$dx';
-      final yExpr = '(H-h)*$dy';
+      // sticker x = W*dx - w/2 (center anchored), y = H*dy - h/2
+      final xExpr = 'W*$dx-w/2';
+      final yExpr = 'H*$dy-h/2';
       
       final start = sticker.startTime.toStringAsFixed(2);
       final end = (sticker.startTime + sticker.mediaDuration).toStringAsFixed(2);
@@ -110,65 +111,17 @@ class FFmpegExportService {
       final text = textLayers[i];
       final nextLink = '[v_txt$i]';
       
-      // Write text to a temporary file to avoid FFmpeg escaping hell
-      final tempDir = await getTemporaryDirectory();
-      final textFile = File('${tempDir.path}/text_layer_$i.txt');
-      // Rough text wrapping to match Flutter UI wrapping behavior
-      final actualFontSize = text.fontSize * text.scaleX;
-      final maxLogicalWidth = text.boxWidth ?? (360.0 * 0.95); // approximate logical width
-      final charsPerLine = (maxLogicalWidth / (actualFontSize * 0.55)).floor();
-      
-      String wrappedText = text.text;
-      if (charsPerLine > 5 && !wrappedText.contains('\n') && wrappedText.length > charsPerLine) {
-        final words = wrappedText.split(' ');
-        String currentLine = '';
-        wrappedText = '';
-        for (final word in words) {
-          if (currentLine.isEmpty) {
-            currentLine = word;
-          } else if ((currentLine.length + 1 + word.length) <= charsPerLine) {
-            currentLine += ' $word';
-          } else {
-            wrappedText += (wrappedText.isEmpty ? '' : '\n') + currentLine;
-            currentLine = word;
-          }
-        }
-        if (currentLine.isNotEmpty) {
-          wrappedText += (wrappedText.isEmpty ? '' : '\n') + currentLine;
-        }
-      }
+      final imagePath = await _generateTextImage(text, width, height);
+      inputArgs.add('-i "$imagePath"');
+      // inputArgs has 1 item per '-i' argument right now? Wait, no! 
+      // Look at inputArgs collection above!
+      // Let's count '-i' in inputArgs.
+      final textInputIdx = inputArgs.where((arg) => arg.startsWith('-i')).length - 1;
 
-      await textFile.writeAsString(wrappedText);
-      final safeTextFilePath = textFile.path.replaceAll('\\', '/');
-
-      final fontPath = await FontManagerService.getFontFilePath(text.fontFamily);
-      // FFmpeg requires absolute path with forward slashes usually, escaping backslashes just in case on windows?
-      // PathProvider gives C:\... on windows, /data/... on android. FFmpeg handles absolute paths well.
-      final safeFontPath = fontPath.replaceAll('\\', '/');
-
-      final hexColor = text.textColor.value.toRadixString(16).padLeft(8, '0').substring(2); // ARGB to RGB
-      final strokeHex = text.strokeColor?.value.toRadixString(16).padLeft(8, '0').substring(2) ?? '000000';
-      
-      // Calculate font size relative to target height
-      // Flutter font size 24 is roughly 24 pixels on a logical screen. We'll scale it.
-      // Standard logical screen height is around 800.
-      final scaleFactor = targetHeight / 800.0;
-      final fontSize = (text.fontSize * text.scaleX * scaleFactor).round();
-      final strokeWidth = (text.strokeWidth * text.scaleX * (scaleFactor / 2)).round(); // FFmpeg borderw is thicker visually
-
-      final dx = text.position.dx;
-      final dy = text.position.dy;
-      final xExpr = '(w-text_w)*$dx';
-      final yExpr = '(h-text_h)*$dy';
-      
       final start = text.startTime.toStringAsFixed(2);
       final end = text.endTime.toStringAsFixed(2);
 
-      filterGraph += '$lastVideoLink'
-          'drawtext=fontfile=\'$safeFontPath\':textfile=\'$safeTextFilePath\':'
-          'fontcolor=0x$hexColor:fontsize=$fontSize:borderw=$strokeWidth:bordercolor=0x$strokeHex:'
-          'x=\'$xExpr\':y=\'$yExpr\':enable=\'between(t,$start,$end)\'$nextLink;';
-      
+      filterGraph += '$lastVideoLink[$textInputIdx:v]overlay=x=0:y=0:enable=\'between(t,$start,$end)\'$nextLink;';
       lastVideoLink = nextLink;
     }
 
@@ -204,5 +157,81 @@ class FFmpegExportService {
       final err = logs != null ? (logs.length > 1000 ? logs.substring(logs.length - 1000) : logs) : "Unknown error";
       throw Exception('FFmpeg export failed:\n...\n$err');
     }
+  }
+
+  static Future<String> _generateTextImage(TextLayerModel textLayer, int targetWidth, int targetHeight) async {
+    // We assume a base logical canvas that matches a typical phone aspect ratio.
+    // The interactive canvas uses the device width. 400 is a safe estimate.
+    const double logicalWidth = 400.0;
+    
+    final double scaleFactor = targetWidth / logicalWidth;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder, Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble()));
+
+    final centerX = textLayer.position.dx * targetWidth;
+    final centerY = textLayer.position.dy * targetHeight;
+
+    canvas.translate(centerX, centerY);
+    canvas.rotate(textLayer.rotation);
+    // Multiply textLayer.scaleX by our target scale factor!
+    canvas.scale(textLayer.scaleX * scaleFactor, textLayer.scaleY * scaleFactor);
+
+    final textSpan = TextSpan(
+      text: textLayer.text,
+      style: TextStyle(
+        fontFamily: textLayer.fontFamily,
+        fontSize: textLayer.fontSize,
+        color: textLayer.textColor,
+        fontWeight: textLayer.fontWeight,
+        fontStyle: textLayer.fontStyle,
+        letterSpacing: textLayer.letterSpacing,
+        // Shadows exactly like interactive_canvas.dart
+        shadows: [
+           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), blurRadius: (textLayer.strokeColor != null ? textLayer.strokeWidth : 2.0) * 1.5),
+           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(1, 1)),
+           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(-1, -1)),
+           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(1, -1)),
+           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(-1, 1)),
+        ],
+      ),
+    );
+
+    final textPainter = TextPainter(
+      text: textSpan,
+      textAlign: textLayer.textAlign,
+      textDirection: TextDirection.ltr,
+    );
+    
+    final maxW = (textLayer.boxWidth != null) ? (textLayer.boxWidth! - 36.0) : ((logicalWidth * 0.95) - 36.0).clamp(120.0, logicalWidth);
+    textPainter.layout(minWidth: 0, maxWidth: maxW);
+
+    final double boxW = textLayer.boxWidth ?? (textPainter.width + 36.0).clamp(120.0, logicalWidth * 0.95);
+    final double boxH = textLayer.boxHeight ?? (textPainter.height + 20.0).clamp(48.0, double.infinity);
+
+    canvas.translate(-boxW / 2, -boxH / 2);
+
+    if (textLayer.backgroundColor != null && textLayer.backgroundColor!.alpha > 0) {
+      final paint = Paint()..color = textLayer.backgroundColor!;
+      final rrect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, 0, boxW, boxH),
+        Radius.circular(textLayer.boxBorderRadius),
+      );
+      canvas.drawRRect(rrect, paint);
+    }
+
+    final double textX = (boxW - textPainter.width) / 2;
+    final double textY = (boxH - textPainter.height) / 2;
+    textPainter.paint(canvas, Offset(textX, textY));
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(targetWidth, targetHeight);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+
+    final tempDir = await getTemporaryDirectory();
+    final file = File('${tempDir.path}/text_img_${textLayer.id}.png');
+    await file.writeAsBytes(byteData!.buffer.asUint8List());
+
+    return file.path.replaceAll('\\', '/');
   }
 }
