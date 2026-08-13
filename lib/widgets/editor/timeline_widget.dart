@@ -40,9 +40,8 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
     final totalSeconds = duration; // Removed the arbitrary +5 seconds overscroll!
     final playhead = project.currentPlayheadTime;
 
-    // Use ref.listen for programmatic playhead updates instead of doing it in build()
     ref.listen<double>(editorProjectProvider.select((p) => p.currentPlayheadTime), (prev, next) {
-      if (project.isPlaying && _horizontalScrollController.hasClients) {
+      if (project.isPlaying && !_isUserScrolling && _horizontalScrollController.hasClients) {
         final targetOffset = next * _timeScale;
         _horizontalScrollController.jumpTo(targetOffset);
       }
@@ -152,9 +151,14 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                         NotificationListener<ScrollNotification>(
                           onNotification: (scrollNotification) {
                             if (scrollNotification.metrics.axis == Axis.horizontal) {
+                              if (scrollNotification is ScrollStartNotification && scrollNotification.dragDetails != null) {
+                                _isUserScrolling = true;
+                              } else if (scrollNotification is ScrollEndNotification) {
+                                _isUserScrolling = false;
+                              }
+
                               if (scrollNotification is ScrollUpdateNotification) {
-                                // Only update playhead if the video is NOT playing (i.e. manual scroll or momentum)
-                                if (!project.isPlaying) {
+                                if (!project.isPlaying || scrollNotification.dragDetails != null) {
                                   final playheadTime = (_horizontalScrollController.offset / _timeScale).clamp(0.0, duration);
                                   WidgetsBinding.instance.addPostFrameCallback((_) {
                                     notifier.seekPlayhead(playheadTime);
@@ -230,17 +234,12 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                               decoration: BoxDecoration(
                                                                 color: isSelected ? const Color(0xFFFF512F) : const Color(0xFFEAB308),
                                                                 borderRadius: BorderRadius.circular(6),
-                                                                border: (isSelected && project.isTrimMode) ? Border.all(color: Colors.white, width: 1.5) : null,
+                                                                border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
                                                               ),
                                                               child: Stack(
                                                                 children: [
                                                                   GestureDetector(
                                                                     behavior: HitTestBehavior.opaque,
-                                                                    onHorizontalDragUpdate: (details) {
-                                                                      if (!isSelected || !project.isTrimMode) return;
-                                                                      final delta = details.delta.dx / _timeScale;
-                                                                      notifier.moveMediaLayer(media.id, delta);
-                                                                    },
                                                                     child: Container(
                                                                       alignment: Alignment.center,
                                                                       color: Colors.transparent,
@@ -250,7 +249,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                                       ),
                                                                     ),
                                                                   ),
-                                                                  if (isSelected && project.isTrimMode)
+                                                                  if (isSelected)
                                                                     Positioned(
                                                                       left: 0, top: 0, bottom: 0,
                                                                       child: GestureDetector(
@@ -269,7 +268,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                                         ),
                                                                       ),
                                                                     ),
-                                                                  if (isSelected && project.isTrimMode)
+                                                                  if (isSelected)
                                                                     Positioned(
                                                                       right: 0, top: 0, bottom: 0,
                                                                       child: GestureDetector(
@@ -326,11 +325,6 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                                 children: [
                                                                   GestureDetector(
                                                                     behavior: HitTestBehavior.opaque,
-                                                                    onHorizontalDragUpdate: (details) {
-                                                                      if (!isSelected || !project.isTrimMode) return;
-                                                                      final delta = details.delta.dx / _timeScale;
-                                                                      notifier.moveMediaLayer(audio.id, delta);
-                                                                    },
                                                                     child: Container(
                                                                       alignment: Alignment.center,
                                                                       color: Colors.transparent,
@@ -416,26 +410,29 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                               child: Column(
                                 children: [
                                   if (videoLayers.isNotEmpty)
-                                    Container(
-                                      height: 26,
-                                      margin: const EdgeInsets.symmetric(vertical: 2),
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          const Icon(Icons.volume_off_rounded, color: Colors.white54, size: 12),
-                                          const SizedBox(width: 4),
-                                          const Text('Mute clip\naudio', style: TextStyle(color: Colors.white54, fontSize: 8, height: 1.1), textAlign: TextAlign.center),
-                                          const SizedBox(width: 4),
-                                          Container(
-                                            width: 24,
-                                            height: 24,
-                                            decoration: BoxDecoration(
-                                              color: Colors.white12,
-                                              borderRadius: BorderRadius.circular(4),
+                                    GestureDetector(
+                                      onTap: () {
+                                        notifier.updateMediaLayerProperties(videoLayers.first.id, isMuted: !videoLayers.first.isMuted);
+                                      },
+                                      child: Container(
+                                        height: 26,
+                                        margin: const EdgeInsets.symmetric(vertical: 2),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              videoLayers.first.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                              color: videoLayers.first.isMuted ? Colors.redAccent : Colors.white54,
+                                              size: 14,
                                             ),
-                                            child: const Icon(Icons.edit_rounded, color: Colors.white, size: 12),
-                                          ),
-                                        ],
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              videoLayers.first.isMuted ? 'Muted' : 'Mute clip\naudio',
+                                              style: const TextStyle(color: Colors.white54, fontSize: 8, height: 1.1),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ...audioLayers.map((audio) {
@@ -573,20 +570,22 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
               child: GestureDetector(
                 onTap: () => notifier.selectLayer(text.id),
                 child: Opacity(
-                  opacity: (project.isTrimMode && !isSelected) ? 0.3 : 1.0,
+                  opacity: (!isSelected && project.isTrimMode) ? 0.3 : 1.0,
                   child: Container(
                     decoration: BoxDecoration(
                       color: isSelected ? const Color(0xFFFF512F) : const Color(0xFFEAB308),
                       borderRadius: BorderRadius.circular(6),
-                      border: (isSelected && project.isTrimMode) ? Border.all(color: Colors.white, width: 1.8) : null,
+                      border: isSelected ? Border.all(color: Colors.white, width: 1.8) : null,
                     ),
                     child: Stack(
                       children: [
                         GestureDetector(
                           behavior: HitTestBehavior.opaque,
-                          onHorizontalDragUpdate: (details) {
-                            if (!isSelected) return;
-                            final delta = details.delta.dx / _timeScale;
+                          onLongPressStart: (_) {
+                            notifier.pushHistory();
+                          },
+                          onLongPressMoveUpdate: (details) {
+                            final delta = details.localOffsetFromOrigin.dx / _timeScale;
                             
                             double newStart = text.startTime + delta;
                             double newEnd = text.endTime + delta;
@@ -611,7 +610,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                             ),
                           ),
                         ),
-                        if (isSelected && project.isTrimMode)
+                        if (isSelected)
                           Positioned(
                             left: 0, top: 0, bottom: 0,
                             child: GestureDetector(
@@ -631,7 +630,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                               ),
                             ),
                           ),
-                        if (isSelected && project.isTrimMode)
+                        if (isSelected)
                           Positioned(
                             right: 0, top: 0, bottom: 0,
                             child: GestureDetector(

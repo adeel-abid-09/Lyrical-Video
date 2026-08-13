@@ -18,6 +18,7 @@ class MediaLayerModel {
   final double startTime;
   final double trimStartTime;
   final double mediaDuration;
+  final double originalDuration;
   final double volume;
   final double playbackSpeed;
   final bool isMuted;
@@ -40,6 +41,7 @@ class MediaLayerModel {
     this.startTime = 0.0,
     this.trimStartTime = 0.0,
     this.mediaDuration = 10.0,
+    double? originalDuration,
     this.volume = 1.0,
     this.playbackSpeed = 1.0,
     this.isMuted = false,
@@ -48,7 +50,8 @@ class MediaLayerModel {
     this.isVisible = true,
     this.isLocked = false,
     DateTime? updatedAt,
-  }) : updatedAt = updatedAt ?? DateTime.now();
+  })  : originalDuration = originalDuration ?? mediaDuration,
+        updatedAt = updatedAt ?? DateTime.now();
 
   MediaLayerModel copyWith({
     String? id,
@@ -62,6 +65,7 @@ class MediaLayerModel {
     double? startTime,
     double? trimStartTime,
     double? mediaDuration,
+    double? originalDuration,
     double? volume,
     double? playbackSpeed,
     bool? isMuted,
@@ -83,6 +87,7 @@ class MediaLayerModel {
       startTime: startTime ?? this.startTime,
       trimStartTime: trimStartTime ?? this.trimStartTime,
       mediaDuration: mediaDuration ?? this.mediaDuration,
+      originalDuration: originalDuration ?? this.originalDuration,
       volume: volume ?? this.volume,
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       isMuted: isMuted ?? this.isMuted,
@@ -101,6 +106,7 @@ class MediaLayerModel {
       'type': type.name,
       'startTime': startTime,
       'mediaDuration': mediaDuration,
+      'originalDuration': originalDuration,
       'volume': volume,
       'isMuted': isMuted,
       'zIndex': zIndex,
@@ -118,6 +124,7 @@ class MediaLayerModel {
       ),
       startTime: (json['startTime'] as num? ?? 0.0).toDouble(),
       mediaDuration: (json['mediaDuration'] as num? ?? 15.0).toDouble(),
+      originalDuration: (json['originalDuration'] as num? ?? json['mediaDuration'] as num? ?? 15.0).toDouble(),
       volume: (json['volume'] as num? ?? 1.0).toDouble(),
       isMuted: json['isMuted'] as bool? ?? false,
       zIndex: json['zIndex'] as int? ?? 0,

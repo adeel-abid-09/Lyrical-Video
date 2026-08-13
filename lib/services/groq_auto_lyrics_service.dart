@@ -91,7 +91,7 @@ class GroqAutoLyricsService {
         }
       }
 
-      final uri = Uri.parse('https://api.groq.com/openai/v1/audio/translations');
+      final uri = Uri.parse('https://api.groq.com/openai/v1/audio/transcriptions');
       
       int maxRetries = _apiKeys.length;
       int attempts = 0;
@@ -99,13 +99,13 @@ class GroqAutoLyricsService {
       while (attempts < maxRetries) {
         try {
           final apiKey = await getApiKey();
-          var request = http.MultipartRequest('POST', Uri.parse(_apiUrl));
+          var request = http.MultipartRequest('POST', uri);
           request.headers.addAll({
             'Authorization': 'Bearer $apiKey',
           });
           request.fields['model'] = 'whisper-large-v3';
           request.fields['response_format'] = 'verbose_json';
-          // DO NOT set prompt field here -- Whisper API echoes prompt text as the first transcript line if set.
+          request.fields['timestamp_granularities[]'] = 'word';
           request.files.add(await http.MultipartFile.fromPath('file', finalUploadPath));
 
           final streamedResponse = await request.send();
@@ -113,44 +113,65 @@ class GroqAutoLyricsService {
 
           if (response.statusCode == 200) {
             final data = jsonDecode(response.body);
+            final wordsArray = data['words'] as List<dynamic>? ?? [];
             final segments = data['segments'] as List<dynamic>? ?? [];
             final fullText = (data['text'] as String? ?? '').trim();
 
             final List<TextLayerModel> lyricLayers = [];
             final uuid = const Uuid();
 
-            if (segments.isNotEmpty) {
+            if (wordsArray.isNotEmpty) {
+              List<dynamic> currentChunk = [];
+              
+              for (int i = 0; i < wordsArray.length; i++) {
+                currentChunk.add(wordsArray[i]);
+                
+                if (currentChunk.length >= 4 || i == wordsArray.length - 1) {
+                  final chunkStart = (currentChunk.first['start'] as num? ?? 0.0).toDouble();
+                  final chunkEnd = (currentChunk.last['end'] as num? ?? chunkStart + 2.0).toDouble();
+                  final originalText = currentChunk.map((w) => w['word'].toString().trim()).join(' ');
+                  
+                  if (originalText.isNotEmpty) {
+                    final translatedText = await _translateChunkToEnglish(originalText, apiKey);
+                    if (translatedText.isNotEmpty) {
+                      lyricLayers.add(
+                        TextLayerModel(
+                          id: uuid.v4(),
+                          text: translatedText,
+                          position: const Offset(0.5, 0.75),
+                          fontSize: 26.0,
+                          textColor: const Color(0xFFFFFFFF),
+                          strokeColor: const Color(0xFF000000),
+                          strokeWidth: 3.0,
+                          startTime: chunkStart,
+                          endTime: chunkEnd > totalDuration ? totalDuration : chunkEnd,
+                          animation: TextAnimationType.fadeIn,
+                          isAutoLyric: true,
+                          zIndex: 10 + lyricLayers.length,
+                        ),
+                      );
+                    }
+                  }
+                  currentChunk = [];
+                }
+              }
+            } else if (segments.isNotEmpty) {
               for (int i = 0; i < segments.length; i++) {
                 final seg = segments[i];
                 final text = (seg['text'] as String? ?? '').trim();
                 if (text.isEmpty) continue;
 
-                // Ignore prompt echoes or instruction metadata
-                final lowerText = text.toLowerCase();
-                if (lowerText.contains('transcribe') ||
-                    lowerText.contains('translating') ||
-                    lowerText.contains('translated') ||
-                    lowerText.contains('spoken lyrics') ||
-                    lowerText.contains('song lyrics') ||
-                    lowerText.contains('clear, accurate') ||
-                    lowerText.contains('line by line')) {
-                  continue;
-                }
-
                 final start = (seg['start'] as num? ?? 0.0).toDouble();
                 final end = (seg['end'] as num? ?? (start + 3.0)).toDouble();
                 final segDuration = (end > start) ? (end - start) : 3.0;
 
-                // Use exact Whisper segment timestamps
                 double minEnd = start + 0.5;
                 double maxEnd = totalDuration > minEnd ? totalDuration : minEnd;
                 final segmentEnd = end.clamp(minEnd, maxEnd);
 
-                // Refine translation to 100% pure, accurate English using Groq LLaMA 3.3 70B
-                final refinedEnglishLine = await _refineToEnglish(text, apiKey);
+                final translatedText = await _translateChunkToEnglish(text, apiKey);
 
-                // Split into chunks of max 3 words
-                final words = refinedEnglishLine.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+                final words = translatedText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
                 List<String> chunks = [];
                 for (int j = 0; j < words.length; j += 3) {
                   chunks.add(words.skip(j).take(3).join(' '));
@@ -163,21 +184,21 @@ class GroqAutoLyricsService {
                   final chunkStart = start + (j * chunkDuration);
                   final chunkEnd = chunkStart + chunkDuration;
 
-                  double minEnd = chunkStart + 0.5;
-                  double maxEnd = totalDuration > minEnd ? totalDuration : minEnd;
-                  final segmentEnd = chunkEnd.clamp(minEnd, maxEnd);
+                  double minEndChunk = chunkStart + 0.5;
+                  double maxEndChunk = totalDuration > minEndChunk ? totalDuration : minEndChunk;
+                  final segmentEndChunk = chunkEnd.clamp(minEndChunk, maxEndChunk);
 
                   lyricLayers.add(
                     TextLayerModel(
                       id: uuid.v4(),
                       text: chunks[j],
-                      position: const Offset(0.5, 0.75), // Bottom lyric area
+                      position: const Offset(0.5, 0.75),
                       fontSize: 26.0,
                       textColor: const Color(0xFFFFFFFF),
                       strokeColor: const Color(0xFF000000),
                       strokeWidth: 3.0,
                       startTime: chunkStart,
-                      endTime: segmentEnd > totalDuration ? totalDuration : segmentEnd,
+                      endTime: segmentEndChunk > totalDuration ? totalDuration : segmentEndChunk,
                       animation: TextAnimationType.fadeIn,
                       isAutoLyric: true,
                       zIndex: 10 + lyricLayers.length,
@@ -186,7 +207,6 @@ class GroqAutoLyricsService {
                 }
               }
             } else if (fullText.isNotEmpty) {
-              // Fallback: If segments array is empty, parse full text string line by line
               final lines = fullText
                   .split(RegExp(r'(?<=[.?!;\n,])\s+|\n+'))
                   .map((s) => s.trim())
@@ -198,24 +218,24 @@ class GroqAutoLyricsService {
                 for (int k = 0; k < lines.length; k++) {
                   final lStart = k * timePerLine;
                   
-                  final refinedText = await _refineToEnglish(lines[k], apiKey);
+                  final translatedText = await _translateChunkToEnglish(lines[k], apiKey);
                   
-                  final words = refinedText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+                  final words = translatedText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
                   List<String> chunks = [];
                   for (int j = 0; j < words.length; j += 3) {
                     chunks.add(words.skip(j).take(3).join(' '));
                   }
 
                   if (chunks.isEmpty) continue;
-                  
+
                   final chunkDuration = timePerLine / chunks.length;
                   for (int j = 0; j < chunks.length; j++) {
                     final chunkStart = lStart + (j * chunkDuration);
                     final chunkEnd = chunkStart + chunkDuration;
 
-                    double minEnd = chunkStart + 0.5;
-                    double maxEnd = totalDuration > minEnd ? totalDuration : minEnd;
-                    final segmentEnd = chunkEnd.clamp(minEnd, maxEnd);
+                    double minEndChunk = chunkStart + 0.5;
+                    double maxEndChunk = totalDuration > minEndChunk ? totalDuration : minEndChunk;
+                    final segmentEndChunk = chunkEnd.clamp(minEndChunk, maxEndChunk);
 
                     lyricLayers.add(
                       TextLayerModel(
@@ -227,7 +247,7 @@ class GroqAutoLyricsService {
                         strokeColor: const Color(0xFF000000),
                         strokeWidth: 3.0,
                         startTime: chunkStart,
-                        endTime: segmentEnd > totalDuration ? totalDuration : segmentEnd,
+                        endTime: segmentEndChunk > totalDuration ? totalDuration : segmentEndChunk,
                         animation: TextAnimationType.fadeIn,
                         isAutoLyric: true,
                         zIndex: 10 + lyricLayers.length,
@@ -275,8 +295,8 @@ class GroqAutoLyricsService {
     }
   }
 
-  /// Refines raw Whisper transcript text into 100% pure, accurate English lyrics using Groq LLaMA 3.3 70B
-  static Future<String> _refineToEnglish(String inputText, String apiKey) async {
+  /// Translates small Whisper transcript chunks into 100% pure, accurate English lyrics using Groq LLaMA 3.3 70B
+  static Future<String> _translateChunkToEnglish(String inputText, String apiKey) async {
     final trimmed = inputText.trim();
     if (trimmed.isEmpty) return trimmed;
 
@@ -292,7 +312,7 @@ class GroqAutoLyricsService {
           'messages': [
             {
               'role': 'system',
-              'content': 'You are an expert lyric translator. Translate the given lyrics into 100% fluent, accurate, beautiful English. If the input is already in English, simply output the corrected and formatted English text. Do NOT output any other languages, explanations, or metadata. Output ONLY the clean English text.'
+              'content': 'Translate the following short audio transcription chunk to natural English. DO NOT output anything except the pure English translation. NO quotes, NO explanation, NO conversational text. Just the translated chunk.'
             },
             {
               'role': 'user',
@@ -300,6 +320,7 @@ class GroqAutoLyricsService {
             }
           ],
           'temperature': 0.1,
+          'max_tokens': 100,
         }),
       ).timeout(const Duration(seconds: 3));
 
@@ -307,8 +328,18 @@ class GroqAutoLyricsService {
         final data = jsonDecode(response.body);
         final translated = (data['choices'][0]['message']['content'] as String? ?? '').trim();
         if (translated.isNotEmpty) {
-          // Remove extraneous quotation marks if present
-          return translated.replaceAll(RegExp(r'^"|"$'), '');
+          final cleanText = translated.replaceAll(RegExp(r'^"|"$'), '').trim();
+          final lowerText = cleanText.toLowerCase();
+          if (lowerText.contains('transcribe') ||
+              lowerText.contains('translating') ||
+              lowerText.contains('translated') ||
+              lowerText.contains('spoken lyrics') ||
+              lowerText.contains('song lyrics') ||
+              lowerText.contains('clear, accurate') ||
+              lowerText.contains('line by line')) {
+            return trimmed;
+          }
+          return cleanText;
         }
       }
     } catch (e) {

@@ -107,7 +107,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
   }
 
   Future<void> _pickAudio({bool replace = false}) async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.audio);
+    final FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['mp3', 'wav', 'aac', 'm4a', 'flac', 'ogg', 'wma']);
     if (result != null && result.files.single.path != null) {
       final path = result.files.single.path!;
       final project = ref.read(editorProjectProvider);
@@ -932,7 +932,6 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
             'Auto Lyrics',
             _runAutoLyrics,
-            highlight: true,
           ),
           _buildItem(Icons.picture_in_picture_rounded, 'Overlay', () => _pickVideo(isOverlay: true)),
           _buildItem(Icons.library_music_rounded, 'Extract Audio', _extractAudio),
@@ -982,7 +981,6 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
             'Auto Lyrics',
             _runAutoLyrics,
-            highlight: true,
           ),
           _buildItem(Icons.change_circle_outlined, 'Replace', () => _pickAudio(replace: true)),
           _buildItem(Icons.content_cut_rounded, 'Split', () {

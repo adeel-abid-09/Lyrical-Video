@@ -28,6 +28,12 @@ class TextLayerModel {
   final TextAlign textAlign;
   final double letterSpacing;
   final double lineSpacing;
+  
+  // Box/Bubble Properties
+  final double? boxWidth;
+  final double? boxHeight;
+  final double boxBorderRadius;
+
   final double startTime; // In seconds
   final double endTime;   // In seconds
   final int zIndex;
@@ -54,6 +60,9 @@ class TextLayerModel {
     this.textAlign = TextAlign.center,
     this.letterSpacing = 1.0,
     this.lineSpacing = 1.2,
+    this.boxWidth,
+    this.boxHeight,
+    this.boxBorderRadius = 8.0,
     this.startTime = 0.0,
     this.endTime = 10.0,
     this.zIndex = 0,
@@ -81,6 +90,9 @@ class TextLayerModel {
     TextAlign? textAlign,
     double? letterSpacing,
     double? lineSpacing,
+    double? boxWidth,
+    double? boxHeight,
+    double? boxBorderRadius,
     double? startTime,
     double? endTime,
     int? zIndex,
@@ -107,6 +119,9 @@ class TextLayerModel {
       textAlign: textAlign ?? this.textAlign,
       letterSpacing: letterSpacing ?? this.letterSpacing,
       lineSpacing: lineSpacing ?? this.lineSpacing,
+      boxWidth: boxWidth ?? this.boxWidth,
+      boxHeight: boxHeight ?? this.boxHeight,
+      boxBorderRadius: boxBorderRadius ?? this.boxBorderRadius,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       zIndex: zIndex ?? this.zIndex,
@@ -129,6 +144,11 @@ class TextLayerModel {
       'textColor': textColor.value,
       'fontSize': fontSize,
       'fontFamily': fontFamily,
+      'letterSpacing': letterSpacing,
+      'lineSpacing': lineSpacing,
+      'boxWidth': boxWidth,
+      'boxHeight': boxHeight,
+      'boxBorderRadius': boxBorderRadius,
       'startTime': startTime,
       'endTime': endTime,
       'zIndex': zIndex,
@@ -151,7 +171,12 @@ class TextLayerModel {
       textColor: Color(json['textColor'] as int? ?? Colors.white.value),
       fontSize: (json['fontSize'] as num? ?? 24.0).toDouble(),
       fontFamily: json['fontFamily'] as String? ?? 'Outfit',
-      startTime: (json['startTime'] as num? ?? 0.0).toDouble(),
+      letterSpacing: (json['letterSpacing'] as num?)?.toDouble() ?? 1.0,
+      lineSpacing: (json['lineSpacing'] as num?)?.toDouble() ?? 1.2,
+      boxWidth: (json['boxWidth'] as num?)?.toDouble(),
+      boxHeight: (json['boxHeight'] as num?)?.toDouble(),
+      boxBorderRadius: (json['boxBorderRadius'] as num?)?.toDouble() ?? 8.0,
+      startTime: (json['startTime'] as num?)?.toDouble() ?? 0.0,
       endTime: (json['endTime'] as num? ?? 10.0).toDouble(),
       zIndex: json['zIndex'] as int? ?? 0,
       isVisible: json['isVisible'] as bool? ?? true,

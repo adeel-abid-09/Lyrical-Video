@@ -43,6 +43,21 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     });
   }
 
+  @override
+  set state(EditorProjectModel value) {
+    double maxTime = 15.0; // default min length
+    for (final layer in value.textLayers) {
+      if (layer.endTime > maxTime) maxTime = layer.endTime;
+    }
+    for (final layer in value.mediaLayers) {
+      final end = layer.startTime + layer.mediaDuration;
+      if (end > maxTime) maxTime = end;
+    }
+    
+    super.state = value.copyWith(duration: maxTime);
+    _triggerAutoSave();
+  }
+
   void pushHistory() {
     _undoStack.add(state);
     _redoStack.clear();
@@ -202,8 +217,8 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     );
   }
 
-  void updateTextLayer(TextLayerModel updatedLayer) {
-    pushHistory();
+  void updateTextLayer(TextLayerModel updatedLayer, {bool recordHistory = true}) {
+    if (recordHistory) pushHistory();
     final updated = state.textLayers.map((l) {
       return l.id == updatedLayer.id ? updatedLayer : l;
     }).toList();
@@ -259,8 +274,6 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     final layer = state.textLayers[layerIndex];
     if (time >= layer.endTime) return;
     
-    pushHistory();
-    
     final updated = List<TextLayerModel>.from(state.textLayers);
     updated[layerIndex] = layer.copyWith(startTime: time);
     state = state.copyWith(textLayers: updated);
@@ -272,8 +285,6 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     
     final layer = state.textLayers[layerIndex];
     if (time <= layer.startTime) return;
-    
-    pushHistory();
     
     final updated = List<TextLayerModel>.from(state.textLayers);
     updated[layerIndex] = layer.copyWith(endTime: time);
@@ -304,6 +315,8 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   void addMediaLayer(MediaLayerModel media) {
     if (media.type == MediaType.video) {
       pushHistory();
+      // Reset playhead to 0 when adding a new video to prevent 5s jump bug
+      state = state.copyWith(currentPlayheadTime: 0.0);
     }
     final updated = [...state.mediaLayers, media];
 
@@ -320,8 +333,8 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     );
   }
 
-  void updateMediaLayer(MediaLayerModel updatedMedia) {
-    pushHistory();
+  void updateMediaLayer(MediaLayerModel updatedMedia, {bool recordHistory = true}) {
+    if (recordHistory) pushHistory();
     final updated = state.mediaLayers.map((m) {
       return m.id == updatedMedia.id ? updatedMedia : m;
     }).toList();
@@ -402,11 +415,17 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     if (layerIndex == -1) return;
     
     final layer = state.mediaLayers[layerIndex];
-    if (layer.mediaDuration + delta <= 0.5) return;
+    double newDuration = layer.mediaDuration + delta;
+    if (newDuration <= 0.5) return;
+    if (layer.type == MediaType.video || layer.type == MediaType.audio) {
+      if (newDuration > layer.originalDuration) {
+        newDuration = layer.originalDuration;
+      }
+    }
     
     final updated = List<MediaLayerModel>.from(state.mediaLayers);
     updated[layerIndex] = layer.copyWith(
-      mediaDuration: layer.mediaDuration + delta,
+      mediaDuration: newDuration,
     );
     state = state.copyWith(mediaLayers: updated);
   }
