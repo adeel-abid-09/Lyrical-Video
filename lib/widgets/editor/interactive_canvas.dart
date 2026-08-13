@@ -159,9 +159,15 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
       if (!_videoControllers.containsKey(layer.id)) {
         VideoPlayerController ctrl;
         if (kIsWeb || layer.path.startsWith('blob:') || layer.path.startsWith('http')) {
-          ctrl = VideoPlayerController.networkUrl(Uri.parse(layer.path));
+          ctrl = VideoPlayerController.networkUrl(
+            Uri.parse(layer.path),
+            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+          );
         } else {
-          ctrl = VideoPlayerController.file(File(layer.path));
+          ctrl = VideoPlayerController.file(
+            File(layer.path),
+            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+          );
         }
         _videoControllers[layer.id] = ctrl;
         ctrl.initialize().then((_) {

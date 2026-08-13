@@ -96,9 +96,15 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   Future<void> _initializePreviewVideo(String path) async {
     try {
       if (kIsWeb || path.startsWith('blob:') || path.startsWith('http')) {
-        _videoController = VideoPlayerController.networkUrl(Uri.parse(path));
+        _videoController = VideoPlayerController.networkUrl(
+          Uri.parse(path),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        );
       } else {
-        _videoController = VideoPlayerController.file(File(path));
+        _videoController = VideoPlayerController.file(
+          File(path),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        );
       }
 
       await _videoController!.initialize();
