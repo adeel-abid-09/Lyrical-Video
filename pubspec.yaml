@@ -49,6 +49,9 @@ dependencies:
   http: ^1.2.2
   share_plus: ^10.0.0
   flutter_dotenv: ^6.0.1
+  keep_screen_on: ^4.0.0
+  on_audio_query: ^2.9.0
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

@@ -349,8 +349,8 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   // --- Media Layer Operations ---
 
   void addMediaLayer(MediaLayerModel media) {
+    pushHistory();
     if (media.type == MediaType.video) {
-      pushHistory();
       // Reset playhead to 0 when adding a new video to prevent 5s jump bug
       state = state.copyWith(currentPlayheadTime: 0.0);
     }

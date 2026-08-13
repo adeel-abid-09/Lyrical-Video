@@ -9,7 +9,8 @@ import 'main_navigation_screen.dart';
 import 'editor_screen.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
-  const SplashScreen({super.key});
+  final String? restoreSessionId;
+  const SplashScreen({super.key, this.restoreSessionId});
 
   @override
   ConsumerState<SplashScreen> createState() => _SplashScreenState();
@@ -56,9 +57,22 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
         },
       ),
     );
+
+    // If there is a session to restore, load it and push EditorScreen on top
+    if (widget.restoreSessionId != null && widget.restoreSessionId!.isNotEmpty) {
+      final projects = await ProjectStorageService.loadSavedProjects();
+      final recoveredProject = projects.where((p) => p.id == widget.restoreSessionId).firstOrNull;
+      if (recoveredProject != null) {
+        if (!mounted) return;
+        ref.read(editorProjectProvider.notifier).loadProject(recoveredProject);
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const EditorScreen()),
+        );
+      }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('editor_restore_session_id');
+    }
   }
-
-
 
   @override
   void dispose() {

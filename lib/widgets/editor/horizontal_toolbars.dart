@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
+
+import 'in_app_audio_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../models/media_layer_model.dart';
@@ -106,26 +108,37 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     }
   }
 
-  Future<void> _pickAudio({bool replace = false}) async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.audio);
-    if (result != null && result.files.single.path != null) {
-      final path = result.files.single.path!;
-      final project = ref.read(editorProjectProvider);
+  void _pickAudio({bool replace = false}) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return FractionallySizedBox(
+          heightFactor: 0.7,
+          child: InAppAudioPicker(
+            onAudioPicked: (path) {
+              Navigator.pop(context); // Close the bottom sheet
+              final project = ref.read(editorProjectProvider);
 
-      if (replace && project.selectedLayerId != null) {
-        ref.read(editorProjectProvider.notifier).replaceMediaLayerPath(project.selectedLayerId!, path, 15.0);
-        return;
-      }
+              if (replace && project.selectedLayerId != null) {
+                ref.read(editorProjectProvider.notifier).replaceMediaLayerPath(project.selectedLayerId!, path, 15.0);
+                return;
+              }
 
-      final media = MediaLayerModel(
-        id: const Uuid().v4(),
-        path: path,
-        type: MediaType.audio,
-        startTime: project.currentPlayheadTime,
-        mediaDuration: 15.0,
-      );
-      ref.read(editorProjectProvider.notifier).addMediaLayer(media);
-    }
+              final media = MediaLayerModel(
+                id: const Uuid().v4(),
+                path: path,
+                type: MediaType.audio,
+                startTime: project.currentPlayheadTime,
+                mediaDuration: 15.0,
+              );
+              ref.read(editorProjectProvider.notifier).addMediaLayer(media);
+            },
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _extractAudio() async {
@@ -193,13 +206,29 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
 
   Future<void> _executeAutoLyricsGenerate() async {
     final project = ref.read(editorProjectProvider);
-    final audioLayers = project.mediaLayers.where((m) => m.type == MediaType.audio || m.type == MediaType.video);
+    final audioVideoLayers = project.mediaLayers.where((m) => m.type == MediaType.audio || m.type == MediaType.video).toList();
+    
+    MediaLayerModel? targetLayer;
+    if (project.selectedLayerId != null) {
+      try {
+        targetLayer = audioVideoLayers.firstWhere((m) => m.id == project.selectedLayerId);
+      } catch (_) {}
+    }
 
-    if (audioLayers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please import a Video or Audio track first!')),
-      );
-      return;
+    if (targetLayer == null) {
+      if (audioVideoLayers.length == 1) {
+        targetLayer = audioVideoLayers.first;
+      } else if (audioVideoLayers.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please import a Video or Audio track first!')),
+        );
+        return;
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please tap to select a specific track for Auto Lyrics!')),
+        );
+        return;
+      }
     }
 
     setState(() {
@@ -208,7 +237,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
 
     try {
       final lyrics = await GroqAutoLyricsService.generateLyricsFromAudio(
-        audioLayers.first.path,
+        targetLayer.path,
         totalDuration: project.duration,
       );
 

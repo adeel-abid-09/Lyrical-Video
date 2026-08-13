@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../state/editor_state_notifier.dart';
 import '../theme/app_theme.dart';
@@ -22,9 +23,40 @@ class EditorScreen extends ConsumerStatefulWidget {
   ConsumerState<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends ConsumerState<EditorScreen> {
+class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBindingObserver {
   bool _isTextEditorOpen = false;
   int _textEditorInitialIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _clearRestoreSession();
+    super.dispose();
+  }
+
+  Future<void> _clearRestoreSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('editor_restore_session_id');
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      final project = ref.read(editorProjectProvider);
+      if (project.mediaLayers.isNotEmpty || project.textLayers.isNotEmpty) {
+        ProjectStorageService.saveProject(project).then((_) async {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('editor_restore_session_id', project.id);
+        });
+      }
+    }
+  }
 
   void _openTextEditor({int initialIndex = 0}) {
     setState(() {
@@ -161,6 +193,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
               icon: const Icon(Icons.file_upload_rounded, color: Colors.white, size: 18),
               label: const Text('Export', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               onPressed: () {
+                ref.read(editorProjectProvider.notifier).setPlaying(false);
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ExportSettingsScreen()),
                 );

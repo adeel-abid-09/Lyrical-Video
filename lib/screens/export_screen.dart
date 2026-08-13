@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
+import 'package:keep_screen_on/keep_screen_on.dart';
 
 import '../models/media_layer_model.dart';
 import '../services/ffmpeg_export_service.dart';
@@ -38,11 +39,13 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   @override
   void initState() {
     super.initState();
+    KeepScreenOn.turnOn();
     _startExport();
   }
 
   @override
   void dispose() {
+    KeepScreenOn.turnOff();
     _videoController?.dispose();
     super.dispose();
   }

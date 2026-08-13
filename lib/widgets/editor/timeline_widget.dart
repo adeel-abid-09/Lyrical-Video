@@ -212,13 +212,12 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              // Video Tracks
-                                              if (videoLayers.isNotEmpty)
-                                                Container(
-                                                  margin: const EdgeInsets.symmetric(vertical: 2),
-                                                  height: 26,
-                                                  child: Stack(
-                                                    children: videoLayers.map((media) {
+                                              // Video Tracks (Always reserve space so audio is immediately below)
+                                              Container(
+                                                margin: const EdgeInsets.symmetric(vertical: 2),
+                                                height: 26,
+                                                child: videoLayers.isNotEmpty ? Stack(
+                                                  children: videoLayers.map((media) {
                                                       final isSelected = project.selectedLayerId == media.id;
                                                       final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : 1.0;
                                                       return Positioned(
@@ -254,6 +253,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                                       left: 0, top: 0, bottom: 0,
                                                                       child: GestureDetector(
                                                                         behavior: HitTestBehavior.opaque,
+                                                                        onHorizontalDragStart: (_) => notifier.pushHistory(),
                                                                         onHorizontalDragUpdate: (details) {
                                                                           final delta = details.delta.dx / _timeScale;
                                                                           notifier.trimMediaLayerStart(media.id, delta);
@@ -273,6 +273,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                                       right: 0, top: 0, bottom: 0,
                                                                       child: GestureDetector(
                                                                         behavior: HitTestBehavior.opaque,
+                                                                        onHorizontalDragStart: (_) => notifier.pushHistory(),
                                                                         onHorizontalDragUpdate: (details) {
                                                                           final delta = details.delta.dx / _timeScale;
                                                                           notifier.trimMediaLayerEnd(media.id, delta);
@@ -294,8 +295,8 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                         ),
                                                       );
                                                     }).toList(),
-                                                  ),
-                                                ),
+                                                ) : const SizedBox(),
+                                              ),
 
                                               // Audio Tracks (One row per layer)
                                               ...audioLayers.map((audio) {
@@ -319,7 +320,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                               decoration: BoxDecoration(
                                                                 color: isSelected ? AppTheme.primaryAccent : Colors.teal.shade700,
                                                                 borderRadius: BorderRadius.circular(6),
-                                                                border: (isSelected && project.isTrimMode) ? Border.all(color: Colors.white, width: 1.5) : null,
+                                                                border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
                                                               ),
                                                               child: Stack(
                                                                 children: [
@@ -331,11 +332,12 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                                       child: const Text('Audio Track', style: TextStyle(color: Colors.white, fontSize: 10)),
                                                                     ),
                                                                   ),
-                                                                  if (isSelected && project.isTrimMode)
+                                                                  if (isSelected)
                                                                     Positioned(
                                                                       left: 0, top: 0, bottom: 0,
                                                                       child: GestureDetector(
                                                                         behavior: HitTestBehavior.opaque,
+                                                                        onHorizontalDragStart: (_) => notifier.pushHistory(),
                                                                         onHorizontalDragUpdate: (details) {
                                                                           final delta = details.delta.dx / _timeScale;
                                                                           notifier.trimMediaLayerStart(audio.id, delta);
@@ -350,11 +352,12 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                                         ),
                                                                       ),
                                                                     ),
-                                                                  if (isSelected && project.isTrimMode)
+                                                                  if (isSelected)
                                                                     Positioned(
                                                                       right: 0, top: 0, bottom: 0,
                                                                       child: GestureDetector(
                                                                         behavior: HitTestBehavior.opaque,
+                                                                        onHorizontalDragStart: (_) => notifier.pushHistory(),
                                                                         onHorizontalDragUpdate: (details) {
                                                                           final delta = details.delta.dx / _timeScale;
                                                                           notifier.trimMediaLayerEnd(audio.id, delta);
@@ -409,52 +412,66 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                               physics: const NeverScrollableScrollPhysics(), // Synced with tracks
                               child: Column(
                                 children: [
-                                  if (videoLayers.isNotEmpty)
-                                    GestureDetector(
+                                  // Always reserve space for video track header
+                                  Container(
+                                    height: 26,
+                                    margin: const EdgeInsets.symmetric(vertical: 2),
+                                    child: videoLayers.isNotEmpty ? GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
                                       onTap: () {
                                         notifier.updateMediaLayerProperties(videoLayers.first.id, isMuted: !videoLayers.first.isMuted);
                                       },
-                                      child: Container(
-                                        height: 26,
-                                        margin: const EdgeInsets.symmetric(vertical: 2),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.center,
-                                          children: [
-                                            Icon(
-                                              videoLayers.first.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                              color: videoLayers.first.isMuted ? Colors.redAccent : Colors.white54,
-                                              size: 14,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              videoLayers.first.isMuted ? 'Muted' : 'Mute clip\naudio',
-                                              style: const TextStyle(color: Colors.white54, fontSize: 8, height: 1.1),
-                                              textAlign: TextAlign.center,
-                                            ),
-                                          ],
-                                        ),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            videoLayers.first.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                            color: videoLayers.first.isMuted ? Colors.redAccent : Colors.white54,
+                                            size: 14,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            videoLayers.first.isMuted ? 'Muted' : 'Mute clip\naudio',
+                                            style: const TextStyle(color: Colors.white54, fontSize: 8, height: 1.1),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ],
                                       ),
-                                    ),
+                                    ) : const SizedBox(),
+                                  ),
                                   ...audioLayers.map((audio) {
                                     return Container(
                                       height: 22,
                                       margin: const EdgeInsets.symmetric(vertical: 2),
-                                      child: GestureDetector(
-                                        onTap: () {
-                                          notifier.updateMediaLayerProperties(audio.id, isMuted: !audio.isMuted);
-                                        },
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.center,
-                                          children: [
-                                            Icon(
-                                              audio.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                              color: audio.isMuted ? Colors.redAccent : AppTheme.primaryAccent,
-                                              size: 14,
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          // Mute/Unmute Button Only
+                                          Expanded(
+                                            child: GestureDetector(
+                                              behavior: HitTestBehavior.opaque,
+                                              onTap: () {
+                                                notifier.updateMediaLayerProperties(audio.id, isMuted: !audio.isMuted);
+                                              },
+                                              child: Row(
+                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                children: [
+                                                  Icon(
+                                                    audio.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                                    color: audio.isMuted ? Colors.redAccent : Colors.white54,
+                                                    size: 14,
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    audio.isMuted ? 'Muted' : 'Mute clip\naudio', 
+                                                    style: const TextStyle(color: Colors.white54, fontSize: 8, height: 1.1),
+                                                    textAlign: TextAlign.center,
+                                                  ),
+                                                ],
+                                              ),
                                             ),
-                                            const SizedBox(width: 4),
-                                            Text(audio.isMuted ? 'Muted' : 'Audio', style: const TextStyle(color: Colors.white54, fontSize: 9)),
-                                          ],
-                                        ),
+                                          ),
+                                        ],
                                       ),
                                     );
                                   }).toList(),
@@ -615,6 +632,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                             left: 0, top: 0, bottom: 0,
                             child: GestureDetector(
                               behavior: HitTestBehavior.opaque,
+                              onHorizontalDragStart: (_) => notifier.pushHistory(),
                               onHorizontalDragUpdate: (details) {
                                 final delta = details.delta.dx / _timeScale;
                                 final newStart = (text.startTime + delta).clamp(minStart, text.endTime - 0.5);
@@ -635,6 +653,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                             right: 0, top: 0, bottom: 0,
                             child: GestureDetector(
                               behavior: HitTestBehavior.opaque,
+                              onHorizontalDragStart: (_) => notifier.pushHistory(),
                               onHorizontalDragUpdate: (details) {
                                 final delta = details.delta.dx / _timeScale;
                                 final newEnd = (text.endTime + delta).clamp(text.startTime + 0.5, maxEnd);

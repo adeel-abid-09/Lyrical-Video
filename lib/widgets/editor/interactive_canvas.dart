@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../models/media_layer_model.dart';
@@ -28,6 +29,7 @@ class InteractiveCanvasWidget extends ConsumerStatefulWidget {
 
 class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidget> {
   final Map<String, VideoPlayerController> _videoControllers = {};
+  final Map<String, AudioPlayer> _audioPlayers = {};
   Timer? _playbackTimer;
   DateTime? _seekIgnoreTimerUntil;
   final ImagePicker _picker = ImagePicker();
@@ -66,6 +68,9 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     _playbackTimer?.cancel();
     for (final controller in _videoControllers.values) {
       controller.dispose();
+    }
+    for (final player in _audioPlayers.values) {
+      player.dispose();
     }
     super.dispose();
   }
@@ -148,9 +153,9 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     );
   }
 
-  void _syncMediaControllers(List<MediaLayerModel> mediaLayers, bool isPlaying, double currentPlayheadTime) {
-    // 1. Initialize any missing controllers
-    for (final layer in mediaLayers) {
+  void _syncMediaControllers(List<MediaLayerModel> videoLayers, List<MediaLayerModel> audioLayers, bool isPlaying, double currentPlayheadTime) {
+    // 1. Initialize any missing controllers for VIDEO
+    for (final layer in videoLayers) {
       if (!_videoControllers.containsKey(layer.id)) {
         VideoPlayerController ctrl;
         if (kIsWeb || layer.path.startsWith('blob:') || layer.path.startsWith('http')) {
@@ -168,16 +173,31 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
         }).catchError((_) {});
       }
     }
+    
+    // 1.5 Initialize any missing controllers for AUDIO
+    for (final layer in audioLayers) {
+      if (!_audioPlayers.containsKey(layer.id)) {
+        final p = AudioPlayer();
+        p.setFilePath(layer.path).catchError((_) {});
+        _audioPlayers[layer.id] = p;
+      }
+    }
 
     // 2. Remove obsolete controllers
-    final activeIds = mediaLayers.map((l) => l.id).toSet();
-    _videoControllers.keys.where((id) => !activeIds.contains(id)).toList().forEach((id) {
+    final activeVideoIds = videoLayers.map((l) => l.id).toSet();
+    _videoControllers.keys.where((id) => !activeVideoIds.contains(id)).toList().forEach((id) {
       _videoControllers[id]?.dispose();
       _videoControllers.remove(id);
     });
+    
+    final activeAudioIds = audioLayers.map((l) => l.id).toSet();
+    _audioPlayers.keys.where((id) => !activeAudioIds.contains(id)).toList().forEach((id) {
+      _audioPlayers[id]?.dispose();
+      _audioPlayers.remove(id);
+    });
 
-    // 3. Sync states
-    for (final layer in mediaLayers) {
+    // 3. Sync states for VIDEO
+    for (final layer in videoLayers) {
       final ctrl = _videoControllers[layer.id];
       if (ctrl != null && ctrl.value.isInitialized) {
         final layerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
@@ -201,15 +221,50 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
         }
 
         final currentPos = ctrl.value.position.inMilliseconds / 1000.0;
-        if (!isPlaying || (currentPos - layerTime).abs() > 0.6) {
-          if ((currentPos - layerTime).abs() > 0.25) {
-            // ONLY seek if the timer has expired!
+        if (!isPlaying) {
+          if ((currentPos - layerTime).abs() > 0.1) {
             if (_seekIgnoreTimerUntil == null || DateTime.now().isAfter(_seekIgnoreTimerUntil!)) {
               _seekIgnoreTimerUntil = DateTime.now().add(const Duration(milliseconds: 350));
               if (layerTime >= layer.trimStartTime && layerTime <= layer.trimStartTime + layer.mediaDuration) {
                  ctrl.seekTo(Duration(milliseconds: (layerTime * 1000).toInt()));
               } else {
                  ctrl.seekTo(Duration(milliseconds: (layer.trimStartTime * 1000).toInt()));
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // 4. Sync states for AUDIO
+    for (final layer in audioLayers) {
+      final p = _audioPlayers[layer.id];
+      if (p != null) {
+        final layerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
+        final shouldBePlayingThisLayer = isPlaying && 
+                                         currentPlayheadTime >= layer.startTime && 
+                                         currentPlayheadTime <= layer.startTime + layer.mediaDuration;
+
+        final targetVolume = layer.isMuted ? 0.0 : layer.volume;
+        if (p.volume != targetVolume) {
+          p.setVolume(targetVolume);
+        }
+
+        if (shouldBePlayingThisLayer && !p.playing) {
+          p.play();
+        } else if (!shouldBePlayingThisLayer && p.playing) {
+          p.pause();
+        }
+
+        final currentPos = p.position.inMilliseconds / 1000.0;
+        if (!isPlaying) {
+          if ((currentPos - layerTime).abs() > 0.1) {
+            if (_seekIgnoreTimerUntil == null || DateTime.now().isAfter(_seekIgnoreTimerUntil!)) {
+              _seekIgnoreTimerUntil = DateTime.now().add(const Duration(milliseconds: 350));
+              if (layerTime >= layer.trimStartTime && layerTime <= layer.trimStartTime + layer.mediaDuration) {
+                 p.seek(Duration(milliseconds: (layerTime * 1000).toInt()));
+              } else {
+                 p.seek(Duration(milliseconds: (layer.trimStartTime * 1000).toInt()));
               }
             }
           }
@@ -240,11 +295,11 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     final project = ref.watch(editorProjectProvider);
     final notifier = ref.read(editorProjectProvider.notifier);
 
-    final playableMediaLayers = project.mediaLayers.where((m) => m.type == MediaType.video || m.type == MediaType.audio).toList();
     final videoLayers = project.mediaLayers.where((m) => m.type == MediaType.video).toList();
+    final audioLayers = project.mediaLayers.where((m) => m.type == MediaType.audio).toList();
     final imageLayers = project.mediaLayers.where((m) => m.type == MediaType.sticker).toList();
 
-    _syncMediaControllers(playableMediaLayers, project.isPlaying, project.currentPlayheadTime);
+    _syncMediaControllers(videoLayers, audioLayers, project.isPlaying, project.currentPlayheadTime);
 
     final targetRatio = project.aspectRatio.ratio;
 
