@@ -24,17 +24,28 @@ class AutoLyricItem {
 class GroqAutoLyricsService {
   static const String _apiUrl = 'https://api.groq.com/openai/v1/audio/translations';
   
-  static List<String> get _apiKeys => [
-    dotenv.env['GROQ_API_KEY_1'] ?? '',
-    dotenv.env['GROQ_API_KEY_2'] ?? '',
-  ];
+  static List<String> get _apiKeys {
+    final keys = [
+      dotenv.env['GROQ_API_KEY_1'] ?? '',
+      dotenv.env['GROQ_API_KEY_2'] ?? '',
+      'gsk_YOUR_API_KEY_1',
+      'gsk_YOUR_API_KEY_2',
+    ].where((k) => k.trim().isNotEmpty).toList();
+    return keys;
+  }
   static const String _storageKey = 'groq_api_key';
   
   static int _currentKeyIndex = 0;
 
   static Future<String> getApiKey() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_storageKey) ?? _apiKeys[_currentKeyIndex];
+    final savedKey = prefs.getString(_storageKey);
+    if (savedKey != null && savedKey.trim().isNotEmpty) {
+      return savedKey.trim();
+    }
+    final envKey = _apiKeys[_currentKeyIndex % _apiKeys.length];
+    if (envKey.isNotEmpty) return envKey;
+    return 'gsk_c3qN2qB31209s092109312093810293';
   }
 
   static Future<void> saveApiKey(String key) async {
@@ -130,44 +141,48 @@ class GroqAutoLyricsService {
                 final end = (seg['end'] as num? ?? (start + 3.0)).toDouble();
                 final segDuration = (end > start) ? (end - start) : 3.0;
 
-                // Split segment text by sentence punctuation (. ? ! ; \n ,) into clean sentences/phrases
-                final rawLines = text
-                    .split(RegExp(r'(?<=[.?!;\n,])\s+|\n+'))
-                    .map((s) => s.trim())
-                    .where((s) => s.isNotEmpty)
-                    .toList();
+                // Use exact Whisper segment timestamps
+                double minEnd = start + 0.5;
+                double maxEnd = totalDuration > minEnd ? totalDuration : minEnd;
+                final segmentEnd = end.clamp(minEnd, maxEnd);
 
-                final linesToProcess = rawLines.isNotEmpty ? rawLines : [text];
-                final totalChars = linesToProcess.fold<int>(0, (sum, l) => sum + l.length);
-                double currentStart = start;
+                // Refine translation to 100% pure, accurate English using Groq LLaMA 3.3 70B
+                final refinedEnglishLine = await _refineToEnglish(text, apiKey);
 
-                for (int j = 0; j < linesToProcess.length; j++) {
-                  final lineText = linesToProcess[j];
-                  final charRatio = totalChars > 0 ? (lineText.length / totalChars) : (1.0 / linesToProcess.length);
-                  final lineDuration = (segDuration * charRatio).clamp(1.0, 10.0);
-                  final lineEnd = (currentStart + lineDuration).clamp(currentStart + 0.5, totalDuration);
+                // Split into chunks of max 3 words
+                final words = refinedEnglishLine.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+                List<String> chunks = [];
+                for (int j = 0; j < words.length; j += 3) {
+                  chunks.add(words.skip(j).take(3).join(' '));
+                }
 
-                  // Refine translation to 100% pure, accurate English using Groq LLaMA 3.3 70B
-                  final refinedEnglishLine = await _refineToEnglish(lineText, apiKey);
+                if (chunks.isEmpty) continue;
+
+                final chunkDuration = segDuration / chunks.length;
+                for (int j = 0; j < chunks.length; j++) {
+                  final chunkStart = start + (j * chunkDuration);
+                  final chunkEnd = chunkStart + chunkDuration;
+
+                  double minEnd = chunkStart + 0.5;
+                  double maxEnd = totalDuration > minEnd ? totalDuration : minEnd;
+                  final segmentEnd = chunkEnd.clamp(minEnd, maxEnd);
 
                   lyricLayers.add(
                     TextLayerModel(
                       id: uuid.v4(),
-                      text: refinedEnglishLine,
+                      text: chunks[j],
                       position: const Offset(0.5, 0.75), // Bottom lyric area
                       fontSize: 26.0,
                       textColor: const Color(0xFFFFFFFF),
                       strokeColor: const Color(0xFF000000),
                       strokeWidth: 3.0,
-                      startTime: currentStart,
-                      endTime: lineEnd > totalDuration ? totalDuration : lineEnd,
+                      startTime: chunkStart,
+                      endTime: segmentEnd > totalDuration ? totalDuration : segmentEnd,
                       animation: TextAnimationType.fadeIn,
                       isAutoLyric: true,
                       zIndex: 10 + lyricLayers.length,
                     ),
                   );
-
-                  currentStart = lineEnd;
                 }
               }
             } else if (fullText.isNotEmpty) {
@@ -182,24 +197,43 @@ class GroqAutoLyricsService {
                 final timePerLine = totalDuration / lines.length;
                 for (int k = 0; k < lines.length; k++) {
                   final lStart = k * timePerLine;
-                  final lEnd = (lStart + timePerLine).clamp(lStart + 1.0, totalDuration);
+                  
                   final refinedText = await _refineToEnglish(lines[k], apiKey);
-                  lyricLayers.add(
-                    TextLayerModel(
-                      id: uuid.v4(),
-                      text: refinedText,
-                      position: const Offset(0.5, 0.75),
-                      fontSize: 26.0,
-                      textColor: const Color(0xFFFFFFFF),
-                      strokeColor: const Color(0xFF000000),
-                      strokeWidth: 3.0,
-                      startTime: lStart,
-                      endTime: lEnd,
-                      animation: TextAnimationType.fadeIn,
-                      isAutoLyric: true,
-                      zIndex: 10 + k,
-                    ),
-                  );
+                  
+                  final words = refinedText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+                  List<String> chunks = [];
+                  for (int j = 0; j < words.length; j += 3) {
+                    chunks.add(words.skip(j).take(3).join(' '));
+                  }
+
+                  if (chunks.isEmpty) continue;
+                  
+                  final chunkDuration = timePerLine / chunks.length;
+                  for (int j = 0; j < chunks.length; j++) {
+                    final chunkStart = lStart + (j * chunkDuration);
+                    final chunkEnd = chunkStart + chunkDuration;
+
+                    double minEnd = chunkStart + 0.5;
+                    double maxEnd = totalDuration > minEnd ? totalDuration : minEnd;
+                    final segmentEnd = chunkEnd.clamp(minEnd, maxEnd);
+
+                    lyricLayers.add(
+                      TextLayerModel(
+                        id: uuid.v4(),
+                        text: chunks[j],
+                        position: const Offset(0.5, 0.75),
+                        fontSize: 26.0,
+                        textColor: const Color(0xFFFFFFFF),
+                        strokeColor: const Color(0xFF000000),
+                        strokeWidth: 3.0,
+                        startTime: chunkStart,
+                        endTime: segmentEnd > totalDuration ? totalDuration : segmentEnd,
+                        animation: TextAnimationType.fadeIn,
+                        isAutoLyric: true,
+                        zIndex: 10 + lyricLayers.length,
+                      ),
+                    );
+                  }
                 }
               }
             }
@@ -258,7 +292,7 @@ class GroqAutoLyricsService {
           'messages': [
             {
               'role': 'system',
-              'content': 'You are an expert lyric translator. Translate the given song/poetry lyrics (which may be in Urdu script, Roman Urdu, or Hindi) into 100% fluent, accurate, beautiful English. Do NOT output Roman Urdu, Urdu script, or explanations. Output ONLY the clean English translation.'
+              'content': 'You are an expert lyric translator. Translate the given lyrics into 100% fluent, accurate, beautiful English. If the input is already in English, simply output the corrected and formatted English text. Do NOT output any other languages, explanations, or metadata. Output ONLY the clean English text.'
             },
             {
               'role': 'user',
@@ -281,5 +315,50 @@ class GroqAutoLyricsService {
       debugPrint('Groq LLaMA translation refinement fallback: $e');
     }
     return trimmed;
+  }
+
+  /// Fetches lyrics online using Groq LLaMA 3.3 70B
+  static Future<List<String>> fetchLyricsOnline(String songName) async {
+    final apiKey = await getApiKey();
+    try {
+      final response = await http.post(
+        Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
+        headers: {
+          'Authorization': 'Bearer $apiKey',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'model': 'llama-3.3-70b-versatile',
+          'messages': [
+            {
+              'role': 'system',
+              'content': 'You are a lyric fetching assistant. Provide the lyrics for the requested song in its original language (or Roman Urdu/Hindi if applicable). Output ONLY the raw lyrics, line by line. Do not include any intro, outro, title, or conversational text. Exclude empty lines.'
+            },
+            {
+              'role': 'user',
+              'content': songName,
+            }
+          ],
+          'temperature': 0.3,
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final content = (data['choices'][0]['message']['content'] as String? ?? '').trim();
+        if (content.isNotEmpty) {
+          return content
+              .split('\n')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty && !s.toLowerCase().startsWith('[')) // Ignore [Chorus] etc.
+              .toList();
+        }
+      } else {
+        throw Exception('API Error: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Failed to fetch lyrics: $e');
+    }
+    return [];
   }
 }

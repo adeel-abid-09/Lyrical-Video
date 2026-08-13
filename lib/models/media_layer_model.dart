@@ -43,7 +43,7 @@ class MediaLayerModel {
     this.volume = 1.0,
     this.playbackSpeed = 1.0,
     this.isMuted = false,
-    this.fitMode = VideoFitMode.contain,
+    this.fitMode = VideoFitMode.cover,
     this.zIndex = 0,
     this.isVisible = true,
     this.isLocked = false,

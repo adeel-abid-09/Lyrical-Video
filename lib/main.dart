@@ -8,6 +8,7 @@ import 'services/project_storage_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'state/editor_state_notifier.dart';
 import 'screens/editor_screen.dart';
+import 'widgets/web_mobile_frame.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -81,6 +82,7 @@ class _LyricalVideoAppState extends ConsumerState<LyricalVideoApp> with WidgetsB
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
+      builder: (context, child) => WebMobileFrame(child: child ?? const SizedBox()),
       home: initialRoute == 'splash'
           ? const SplashScreen()
           : FutureBuilder(

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:flutter/services.dart';
@@ -11,8 +12,20 @@ class FFmpegExportService {
 
   static Future<String?> exportProject(
     EditorProjectModel project, {
+    String resolution = '1080p',
+    int fps = 30,
+    String quality = 'High',
     Function(double progress)? onProgress,
   }) async {
+    if (kIsWeb) {
+      // On web preview mode, simulate export delay & return message
+      for (int i = 1; i <= 10; i++) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        onProgress?.call(i / 10);
+      }
+      return 'Web Preview: Video render simulated ($resolution @ ${fps}FPS, $quality quality).';
+    }
+
     final tempDir = await getTemporaryDirectory();
     final outputPath = '${tempDir.path}/lyrical_export_${DateTime.now().millisecondsSinceEpoch}.mp4';
 
@@ -20,9 +33,21 @@ class FFmpegExportService {
     final videoLayers = project.mediaLayers.where((m) => m.type == MediaType.video).toList();
     final audioLayers = project.mediaLayers.where((m) => m.type == MediaType.audio).toList();
 
-    final width = project.aspectRatio.resolution.width.toInt();
-    final height = project.aspectRatio.resolution.height.toInt();
+    int targetHeight = 1080;
+    if (resolution == '720p') targetHeight = 720;
+    if (resolution == '2K/4K') targetHeight = 2160;
+
+    final ratioWidth = project.aspectRatio.resolution.width;
+    final ratioHeight = project.aspectRatio.resolution.height;
+    final calculatedWidth = ((targetHeight * (ratioWidth / ratioHeight)) / 2).round() * 2;
+
+    final width = calculatedWidth;
+    final height = targetHeight;
     final duration = project.duration.toStringAsFixed(2);
+
+    String bitrateParam = '-b:v 6M';
+    if (quality == 'Lower') bitrateParam = '-b:v 3M';
+    if (quality == 'Higher') bitrateParam = '-b:v 12M';
 
     String cmd = '';
 
@@ -30,15 +55,15 @@ class FFmpegExportService {
       final inputVideo = videoLayers.first.path;
       if (audioLayers.isNotEmpty) {
         final inputAudio = audioLayers.first.path;
-        cmd = '-y -i "$inputVideo" -i "$inputAudio" -t $duration -vf "scale=$width:$height:force_original_aspect_ratio=decrease,pad=$width:$height:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$outputPath"';
+        cmd = '-y -i "$inputVideo" -i "$inputAudio" -t $duration -r $fps -vf "scale=$width:$height:force_original_aspect_ratio=decrease,pad=$width:$height:(ow-iw)/2:(oh-ih)/2" -c:v libx264 $bitrateParam -pix_fmt yuv420p -c:a aac -shortest "$outputPath"';
       } else {
-        cmd = '-y -i "$inputVideo" -t $duration -vf "scale=$width:$height:force_original_aspect_ratio=decrease,pad=$width:$height:(ow-iw)/2:(oh-ih)/2" -c:v libx264 -pix_fmt yuv420p -c:a aac "$outputPath"';
+        cmd = '-y -i "$inputVideo" -t $duration -r $fps -vf "scale=$width:$height:force_original_aspect_ratio=decrease,pad=$width:$height:(ow-iw)/2:(oh-ih)/2" -c:v libx264 $bitrateParam -pix_fmt yuv420p -c:a aac "$outputPath"';
       }
     } else if (audioLayers.isNotEmpty) {
       final inputAudio = audioLayers.first.path;
-      cmd = '-y -f lavfi -i color=c=black:s=${width}x$height:r=30:d=$duration -i "$inputAudio" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$outputPath"';
+      cmd = '-y -f lavfi -i color=c=black:s=${width}x$height:r=$fps:d=$duration -i "$inputAudio" -c:v libx264 $bitrateParam -pix_fmt yuv420p -c:a aac -shortest "$outputPath"';
     } else {
-      cmd = '-y -f lavfi -i color=c=black:s=${width}x$height:r=30:d=$duration -c:v libx264 -pix_fmt yuv420p "$outputPath"';
+      cmd = '-y -f lavfi -i color=c=black:s=${width}x$height:r=$fps:d=$duration -c:v libx264 $bitrateParam -pix_fmt yuv420p "$outputPath"';
     }
 
     final session = await FFmpegKit.execute(cmd);

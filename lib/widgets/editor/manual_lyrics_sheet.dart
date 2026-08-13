@@ -15,26 +15,17 @@ class _ManualLyricsSheetWidgetState extends ConsumerState<ManualLyricsSheetWidge
   final TextEditingController _lyricsController = TextEditingController();
   List<String> _lines = [];
 
-  void _parseLines() {
+  void _queueLyrics() {
     final text = _lyricsController.text.trim();
     if (text.isNotEmpty) {
-      setState(() {
-        _lines = text.split('\n').where((line) => line.trim().isNotEmpty).toList();
-      });
+      final parsedLines = text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+      ref.read(editorProjectProvider.notifier).setQueuedLyrics(parsedLines);
+      
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${parsedLines.length} lines queued! Tap "Drop Next Lyric" on the timeline to place them.')),
+      );
     }
-  }
-
-  void _addSingleLineToTimeline(String lineText) {
-    final project = ref.read(editorProjectProvider);
-    final notifier = ref.read(editorProjectProvider.notifier);
-    final startTime = project.currentPlayheadTime;
-    final endTime = (startTime + 3.5).clamp(0.0, project.duration);
-
-    notifier.addTextLayer(lineText, position: const Offset(0.5, 0.75));
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Added lyric line at ${startTime.toStringAsFixed(1)}s!')),
-    );
   }
 
   @override
@@ -66,7 +57,7 @@ class _ManualLyricsSheetWidgetState extends ConsumerState<ManualLyricsSheetWidge
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Manual Lyrics Import & Sync',
+                'Manual Lyrics',
                 style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
               ),
               IconButton(
@@ -108,42 +99,9 @@ class _ManualLyricsSheetWidgetState extends ConsumerState<ManualLyricsSheetWidge
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryAccent),
                 icon: const Icon(Icons.playlist_add_rounded, color: Colors.white),
-                label: const Text('Parse Lyrics Lines', style: TextStyle(color: Colors.white, fontSize: 16)),
-                onPressed: _parseLines,
+                label: const Text('Queue Lyrics', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onPressed: _queueLyrics,
               ),
-            ),
-          ] else ...[
-            Text(
-              'Current Playhead: ${project.currentPlayheadTime.toStringAsFixed(1)}s',
-              style: const TextStyle(color: AppTheme.primaryAccent, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: ListView.builder(
-                itemCount: _lines.length,
-                itemBuilder: (context, index) {
-                  final line = _lines[index];
-                  return Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF28283C),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: ListTile(
-                      title: Text(line, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.add_alarm_rounded, color: AppTheme.primaryAccent),
-                        onPressed: () => _addSingleLineToTimeline(line),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: () => setState(() => _lines = []),
-              child: const Text('Edit Lyrics List', style: TextStyle(color: Colors.white54)),
             ),
           ],
         ],

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/media_layer_model.dart';
+import '../../models/editor_project_model.dart';
+import '../../models/text_layer_model.dart';
 import '../../state/editor_state_notifier.dart';
 import '../../theme/app_theme.dart';
 
@@ -35,15 +37,16 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
     final notifier = ref.read(editorProjectProvider.notifier);
 
     final duration = project.duration;
-    final totalSeconds = (duration.ceil() + 5).toDouble();
+    final totalSeconds = duration; // Removed the arbitrary +5 seconds overscroll!
     final playhead = project.currentPlayheadTime;
 
-    if (!_isUserScrolling && _horizontalScrollController.hasClients) {
-      final targetOffset = playhead * _timeScale;
-      if ((_horizontalScrollController.offset - targetOffset).abs() > 1.0) {
+    // Use ref.listen for programmatic playhead updates instead of doing it in build()
+    ref.listen<double>(editorProjectProvider.select((p) => p.currentPlayheadTime), (prev, next) {
+      if (project.isPlaying && _horizontalScrollController.hasClients) {
+        final targetOffset = next * _timeScale;
         _horizontalScrollController.jumpTo(targetOffset);
       }
-    }
+    });
 
     return Container(
       height: 160,
@@ -64,25 +67,28 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
               color: const Color(0xFF1E1E2C),
               child: Row(
                 children: [
-                  // 1. Left: Undo / Redo
-                  IconButton(
-                    iconSize: 18,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32),
-                    icon: Icon(Icons.undo_rounded, color: notifier.canUndo ? Colors.white70 : Colors.white24),
-                    onPressed: notifier.canUndo ? () => notifier.undo() : null,
-                  ),
-                  IconButton(
-                    iconSize: 18,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32),
-                    icon: Icon(Icons.redo_rounded, color: notifier.canRedo ? Colors.white70 : Colors.white24),
-                    onPressed: notifier.canRedo ? () => notifier.redo() : null,
+                  // 1. Left: Time Display
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    constraints: const BoxConstraints(minWidth: 84),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '${_formatTime(playhead)} / ${_formatTime(duration)}',
+                        style: const TextStyle(
+                          color: Colors.white70, // Slightly dimmed to match screenshot
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
                   ),
 
                   const Spacer(),
 
-                  // 2. Center: -5s, Play/Pause, +5s
+                  // 2. Center: Play/Pause controls
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -99,8 +105,8 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 36),
                         icon: Icon(
-                          project.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-                          color: AppTheme.primaryAccent,
+                          project.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_arrow_rounded,
+                          color: Colors.white,
                         ),
                         onPressed: () => notifier.togglePlayPause(),
                       ),
@@ -117,28 +123,8 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
 
                   const Spacer(),
 
-                  // 3. Right: Aligned Time Display (00:04 / 00:15)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    constraints: const BoxConstraints(minWidth: 84),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF28283C),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.white12, width: 1),
-                    ),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        '${_formatTime(playhead)} / ${_formatTime(duration)}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                  ),
+                  // 3. Right: Spacer to keep play button centered
+                  const SizedBox(width: 84),
                 ],
               ),
             ),
@@ -147,7 +133,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  const playheadOffset = 50.0;
+                  const playheadOffset = 100.0;
                   final trackWidth = (totalSeconds * _timeScale).clamp(0.0, double.infinity);
 
                   final videoLayers = project.mediaLayers.where((m) => m.type == MediaType.video || m.type == MediaType.sticker).toList();
@@ -166,15 +152,14 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                         NotificationListener<ScrollNotification>(
                           onNotification: (scrollNotification) {
                             if (scrollNotification.metrics.axis == Axis.horizontal) {
-                              if (scrollNotification is ScrollStartNotification && scrollNotification.dragDetails != null) {
-                                _isUserScrolling = true;
-                                ref.read(editorProjectProvider.notifier).setScrubbing(true);
-                              } else if (scrollNotification is ScrollUpdateNotification && _isUserScrolling) {
-                                final playheadTime = (_horizontalScrollController.offset / _timeScale).clamp(0.0, duration);
-                                ref.read(editorProjectProvider.notifier).seekPlayhead(playheadTime);
-                              } else if (scrollNotification is ScrollEndNotification) {
-                                _isUserScrolling = false;
-                                ref.read(editorProjectProvider.notifier).setScrubbing(false);
+                              if (scrollNotification is ScrollUpdateNotification) {
+                                // Only update playhead if the video is NOT playing (i.e. manual scroll or momentum)
+                                if (!project.isPlaying) {
+                                  final playheadTime = (_horizontalScrollController.offset / _timeScale).clamp(0.0, duration);
+                                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                                    notifier.seekPlayhead(playheadTime);
+                                  });
+                                }
                               }
                             }
                             return false;
@@ -231,23 +216,79 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                   child: Stack(
                                                     children: videoLayers.map((media) {
                                                       final isSelected = project.selectedLayerId == media.id;
+                                                      final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : 1.0;
                                                       return Positioned(
                                                         left: media.startTime * _timeScale,
-                                                        width: media.mediaDuration * _timeScale,
+                                                        width: (media.mediaDuration > 0 ? media.mediaDuration : duration) * _timeScale,
                                                         top: 0,
                                                         bottom: 0,
-                                                        child: GestureDetector(
-                                                          onTap: () => notifier.selectLayer(media.id),
-                                                          child: Container(
-                                                            decoration: BoxDecoration(
-                                                              color: isSelected ? AppTheme.primaryAccent : Colors.indigo.withOpacity(0.85),
-                                                              borderRadius: BorderRadius.circular(6),
-                                                              border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
-                                                            ),
-                                                            child: Center(
-                                                              child: Text(
-                                                                media.type == MediaType.video ? 'Video' : 'Photo',
-                                                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                                        child: Opacity(
+                                                          opacity: opacity,
+                                                          child: GestureDetector(
+                                                            onTap: () => notifier.selectLayer(media.id),
+                                                            child: Container(
+                                                              decoration: BoxDecoration(
+                                                                color: isSelected ? const Color(0xFFFF512F) : const Color(0xFFEAB308),
+                                                                borderRadius: BorderRadius.circular(6),
+                                                                border: (isSelected && project.isTrimMode) ? Border.all(color: Colors.white, width: 1.5) : null,
+                                                              ),
+                                                              child: Stack(
+                                                                children: [
+                                                                  GestureDetector(
+                                                                    behavior: HitTestBehavior.opaque,
+                                                                    onHorizontalDragUpdate: (details) {
+                                                                      if (!isSelected || !project.isTrimMode) return;
+                                                                      final delta = details.delta.dx / _timeScale;
+                                                                      notifier.moveMediaLayer(media.id, delta);
+                                                                    },
+                                                                    child: Container(
+                                                                      alignment: Alignment.center,
+                                                                      color: Colors.transparent,
+                                                                      child: Text(
+                                                                        media.type == MediaType.video ? 'Video' : 'Photo',
+                                                                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                  if (isSelected && project.isTrimMode)
+                                                                    Positioned(
+                                                                      left: 0, top: 0, bottom: 0,
+                                                                      child: GestureDetector(
+                                                                        behavior: HitTestBehavior.opaque,
+                                                                        onHorizontalDragUpdate: (details) {
+                                                                          final delta = details.delta.dx / _timeScale;
+                                                                          notifier.trimMediaLayerStart(media.id, delta);
+                                                                        },
+                                                                        child: Container(
+                                                                          width: 15,
+                                                                          decoration: const BoxDecoration(
+                                                                            color: Colors.white,
+                                                                            borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
+                                                                          ),
+                                                                          child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  if (isSelected && project.isTrimMode)
+                                                                    Positioned(
+                                                                      right: 0, top: 0, bottom: 0,
+                                                                      child: GestureDetector(
+                                                                        behavior: HitTestBehavior.opaque,
+                                                                        onHorizontalDragUpdate: (details) {
+                                                                          final delta = details.delta.dx / _timeScale;
+                                                                          notifier.trimMediaLayerEnd(media.id, delta);
+                                                                        },
+                                                                        child: Container(
+                                                                          width: 15,
+                                                                          decoration: const BoxDecoration(
+                                                                            color: Colors.white,
+                                                                            borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
+                                                                          ),
+                                                                          child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                ],
                                                               ),
                                                             ),
                                                           ),
@@ -260,6 +301,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                               // Audio Tracks (One row per layer)
                                               ...audioLayers.map((audio) {
                                                 final isSelected = project.selectedLayerId == audio.id;
+                                                final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : 1.0;
                                                 return Container(
                                                   margin: const EdgeInsets.symmetric(vertical: 2),
                                                   height: 22,
@@ -270,15 +312,71 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                         width: audio.mediaDuration * _timeScale,
                                                         top: 0,
                                                         bottom: 0,
-                                                        child: GestureDetector(
-                                                          onTap: () => notifier.selectLayer(audio.id),
-                                                          child: Container(
-                                                            decoration: BoxDecoration(
-                                                              color: isSelected ? AppTheme.primaryAccent : Colors.teal.shade700,
-                                                              borderRadius: BorderRadius.circular(6),
-                                                            ),
-                                                            child: const Center(
-                                                              child: Text('Audio Track', style: TextStyle(color: Colors.white, fontSize: 10)),
+                                                        child: Opacity(
+                                                          opacity: opacity,
+                                                          child: GestureDetector(
+                                                            onTap: () => notifier.selectLayer(audio.id),
+                                                            child: Container(
+                                                              decoration: BoxDecoration(
+                                                                color: isSelected ? AppTheme.primaryAccent : Colors.teal.shade700,
+                                                                borderRadius: BorderRadius.circular(6),
+                                                                border: (isSelected && project.isTrimMode) ? Border.all(color: Colors.white, width: 1.5) : null,
+                                                              ),
+                                                              child: Stack(
+                                                                children: [
+                                                                  GestureDetector(
+                                                                    behavior: HitTestBehavior.opaque,
+                                                                    onHorizontalDragUpdate: (details) {
+                                                                      if (!isSelected || !project.isTrimMode) return;
+                                                                      final delta = details.delta.dx / _timeScale;
+                                                                      notifier.moveMediaLayer(audio.id, delta);
+                                                                    },
+                                                                    child: Container(
+                                                                      alignment: Alignment.center,
+                                                                      color: Colors.transparent,
+                                                                      child: const Text('Audio Track', style: TextStyle(color: Colors.white, fontSize: 10)),
+                                                                    ),
+                                                                  ),
+                                                                  if (isSelected && project.isTrimMode)
+                                                                    Positioned(
+                                                                      left: 0, top: 0, bottom: 0,
+                                                                      child: GestureDetector(
+                                                                        behavior: HitTestBehavior.opaque,
+                                                                        onHorizontalDragUpdate: (details) {
+                                                                          final delta = details.delta.dx / _timeScale;
+                                                                          notifier.trimMediaLayerStart(audio.id, delta);
+                                                                        },
+                                                                        child: Container(
+                                                                          width: 15,
+                                                                          decoration: const BoxDecoration(
+                                                                            color: Colors.white,
+                                                                            borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
+                                                                          ),
+                                                                          child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  if (isSelected && project.isTrimMode)
+                                                                    Positioned(
+                                                                      right: 0, top: 0, bottom: 0,
+                                                                      child: GestureDetector(
+                                                                        behavior: HitTestBehavior.opaque,
+                                                                        onHorizontalDragUpdate: (details) {
+                                                                          final delta = details.delta.dx / _timeScale;
+                                                                          notifier.trimMediaLayerEnd(audio.id, delta);
+                                                                        },
+                                                                        child: Container(
+                                                                          width: 15,
+                                                                          decoration: const BoxDecoration(
+                                                                            color: Colors.white,
+                                                                            borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
+                                                                          ),
+                                                                          child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                ],
+                                                              ),
                                                             ),
                                                           ),
                                                         ),
@@ -290,36 +388,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
 
                                               // Text Tracks
                                               if (project.textLayers.isNotEmpty)
-                                                Container(
-                                                  margin: const EdgeInsets.symmetric(vertical: 2),
-                                                  height: 22,
-                                                  child: Stack(
-                                                    children: project.textLayers.map((text) {
-                                                      final isSelected = project.selectedLayerId == text.id;
-                                                      return Positioned(
-                                                        left: text.startTime * _timeScale,
-                                                        width: ((text.endTime - text.startTime) * _timeScale).clamp(24.0, double.infinity),
-                                                        top: 0,
-                                                        bottom: 0,
-                                                        child: GestureDetector(
-                                                          onTap: () => notifier.selectLayer(text.id),
-                                                          child: Container(
-                                                            decoration: BoxDecoration(
-                                                              color: isSelected ? AppTheme.primaryAccent : (text.isAutoLyric ? Colors.purple.shade700 : Colors.amber.shade800),
-                                                              borderRadius: BorderRadius.circular(6),
-                                                            ),
-                                                            child: Padding(
-                                                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                                                              child: Center(
-                                                                child: Text(text.text, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 10)),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      );
-                                                    }).toList(),
-                                                  ),
-                                                ),
+                                                ..._buildTextTracks(project, notifier),
                                             ],
                                           ),
                                         ),
@@ -350,7 +419,24 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                     Container(
                                       height: 26,
                                       margin: const EdgeInsets.symmetric(vertical: 2),
-                                      child: const Icon(Icons.movie_rounded, color: Colors.white54, size: 14),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          const Icon(Icons.volume_off_rounded, color: Colors.white54, size: 12),
+                                          const SizedBox(width: 4),
+                                          const Text('Mute clip\naudio', style: TextStyle(color: Colors.white54, fontSize: 8, height: 1.1), textAlign: TextAlign.center),
+                                          const SizedBox(width: 4),
+                                          Container(
+                                            width: 24,
+                                            height: 24,
+                                            decoration: BoxDecoration(
+                                              color: Colors.white12,
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: const Icon(Icons.edit_rounded, color: Colors.white, size: 12),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ...audioLayers.map((audio) {
                                     return Container(
@@ -360,15 +446,25 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                         onTap: () {
                                           notifier.updateMediaLayerProperties(audio.id, isMuted: !audio.isMuted);
                                         },
-                                        child: Icon(
-                                          audio.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                          color: audio.isMuted ? Colors.redAccent : AppTheme.primaryAccent,
-                                          size: 16,
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              audio.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                              color: audio.isMuted ? Colors.redAccent : AppTheme.primaryAccent,
+                                              size: 14,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(audio.isMuted ? 'Muted' : 'Audio', style: const TextStyle(color: Colors.white54, fontSize: 9)),
+                                          ],
                                         ),
                                       ),
                                     );
                                   }).toList(),
                                   if (project.textLayers.isNotEmpty)
+                                    // With the new layout logic we will have multiple text tracks, 
+                                    // but we just render a simple placeholder for the texts section or nothing.
+                                    // Actually, we don't need a row header for every text track.
                                     Container(
                                       height: 22,
                                       margin: const EdgeInsets.symmetric(vertical: 2),
@@ -426,6 +522,145 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
         ),
       ),
     );
+  }
+
+  List<Widget> _buildTextTracks(EditorProjectModel project, EditorProjectNotifier notifier) {
+    // Sort texts by start time to ensure consistent row assignment
+    final sortedTexts = List<TextLayerModel>.from(project.textLayers)..sort((a, b) => a.startTime.compareTo(b.startTime));
+                                                  
+    // Group text layers into non-overlapping rows
+    final List<List<TextLayerModel>> textRows = [];
+    for (final textLayer in sortedTexts) {
+      bool placed = false;
+      for (int i = 0; i < textRows.length; i++) {
+        bool overlaps = false;
+        for (final placedLayer in textRows[i]) {
+          if (textLayer.startTime < placedLayer.endTime && textLayer.endTime > placedLayer.startTime) {
+            overlaps = true;
+            break;
+          }
+        }
+        if (!overlaps) {
+          textRows[i].add(textLayer);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        textRows.add([textLayer]);
+      }
+    }
+
+    return textRows.map<Widget>((List<TextLayerModel> row) {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        height: 22,
+        child: Stack(
+          children: row.map<Widget>((TextLayerModel text) {
+            final isSelected = project.selectedLayerId == text.id;
+            final width = ((text.endTime - text.startTime) * _timeScale).clamp(24.0, double.infinity);
+                                                          
+            // Calculate drag constraints based on adjacent items in the same row
+            final index = row.indexOf(text);
+            final minStart = index > 0 ? row[index - 1].endTime : 0.0;
+            final maxEnd = index < row.length - 1 ? row[index + 1].startTime : project.duration;
+
+            return Positioned(
+              left: text.startTime * _timeScale,
+              width: width,
+              top: 0,
+              bottom: 0,
+              child: GestureDetector(
+                onTap: () => notifier.selectLayer(text.id),
+                child: Opacity(
+                  opacity: (project.isTrimMode && !isSelected) ? 0.3 : 1.0,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isSelected ? const Color(0xFFFF512F) : const Color(0xFFEAB308),
+                      borderRadius: BorderRadius.circular(6),
+                      border: (isSelected && project.isTrimMode) ? Border.all(color: Colors.white, width: 1.8) : null,
+                    ),
+                    child: Stack(
+                      children: [
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onHorizontalDragUpdate: (details) {
+                            if (!isSelected) return;
+                            final delta = details.delta.dx / _timeScale;
+                            
+                            double newStart = text.startTime + delta;
+                            double newEnd = text.endTime + delta;
+                            
+                            if (newStart < minStart) {
+                              newStart = minStart;
+                            } else if (newEnd > maxEnd) {
+                              newStart = maxEnd - (text.endTime - text.startTime);
+                            }
+                            
+                            final effectiveDelta = newStart - text.startTime;
+                            if (effectiveDelta != 0) {
+                              notifier.moveTextLayer(text.id, effectiveDelta);
+                            }
+                          },
+                          child: Container(
+                            alignment: Alignment.center,
+                            color: Colors.transparent,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              child: Text(text.text, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 10)),
+                            ),
+                          ),
+                        ),
+                        if (isSelected && project.isTrimMode)
+                          Positioned(
+                            left: 0, top: 0, bottom: 0,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onHorizontalDragUpdate: (details) {
+                                final delta = details.delta.dx / _timeScale;
+                                final newStart = (text.startTime + delta).clamp(minStart, text.endTime - 0.5);
+                                notifier.trimTextLayerStart(text.id, newStart);
+                              },
+                              child: Container(
+                                width: 15,
+                                decoration: const BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
+                                ),
+                                child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                              ),
+                            ),
+                          ),
+                        if (isSelected && project.isTrimMode)
+                          Positioned(
+                            right: 0, top: 0, bottom: 0,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onHorizontalDragUpdate: (details) {
+                                final delta = details.delta.dx / _timeScale;
+                                final newEnd = (text.endTime + delta).clamp(text.startTime + 0.5, maxEnd);
+                                notifier.trimTextLayerEnd(text.id, newEnd);
+                              },
+                              child: Container(
+                                width: 15,
+                                decoration: const BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
+                                ),
+                                child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      );
+    }).toList();
   }
 
   String _formatTime(double seconds) {

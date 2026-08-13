@@ -105,6 +105,10 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     state = state.copyWith(isScrubbing: isScrubbing);
   }
 
+  void setTrimMode(bool isTrimMode) {
+    state = state.copyWith(isTrimMode: isTrimMode);
+  }
+
   void seekPlayhead(double time) {
     if (time < 0) time = 0;
     if (time > state.duration) time = state.duration;
@@ -115,27 +119,76 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     state = state.copyWith(isPlaying: !state.isPlaying);
   }
 
-  void selectLayer(String? layerId) {
-    state = state.copyWith(selectedLayerId: layerId);
+  void selectLayer(String? id) {
+    if (state.selectedLayerId == id) return;
+    state = state.copyWith(selectedLayerId: id, isTrimMode: false);
   }
 
   // --- Text Layer Operations ---
 
   void addTextLayer(String text, {Offset position = const Offset(0.5, 0.5)}) {
     pushHistory();
+    
+    // Offset new layers so they don't overlap completely
+    final existingLayers = state.textLayers.length;
+    final yOffset = 0.5 + ((existingLayers % 5) * 0.08); // Drops slightly lower each time
+    final finalPos = position == const Offset(0.5, 0.5) ? Offset(0.5, yOffset) : position;
+
+    final start = state.currentPlayheadTime;
+    double end = start + 3.0;
+    if (end > state.duration) {
+      // If we are at the end, just make it 3 seconds and extend duration, or clamp it?
+      // Since it's text, let's just use 3s. If we need to extend duration, we can update state duration below.
+      // But for simplicity, we'll just allow it to exceed the current duration temporarily, 
+      // or clamp it. CapCut allows text to extend beyond video, making a black screen.
+      // Let's just set end to start + 3.0.
+    }
+
     final newLayer = TextLayerModel(
       id: const Uuid().v4(),
       text: text,
-      position: position,
-      startTime: 0.0,
-      endTime: state.duration,
+      position: finalPos,
+      startTime: start,
+      endTime: end,
       zIndex: state.textLayers.length + 10,
     );
 
     final updated = [...state.textLayers, newLayer];
+    
+    double newDuration = state.duration;
+    if (end > newDuration) {
+      newDuration = end;
+    }
+    
     state = state.copyWith(
       textLayers: updated,
       selectedLayerId: newLayer.id,
+      duration: newDuration,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  // --- Queued Lyrics Operations ---
+  void setQueuedLyrics(List<String> lyrics) {
+    state = state.copyWith(
+      queuedLyrics: lyrics,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void popQueuedLyric() {
+    if (state.queuedLyrics.isNotEmpty) {
+      final updated = List<String>.from(state.queuedLyrics)..removeAt(0);
+      state = state.copyWith(
+        queuedLyrics: updated,
+        updatedAt: DateTime.now(),
+      );
+    }
+  }
+
+  void clearQueuedLyrics() {
+    state = state.copyWith(
+      queuedLyrics: const [],
       updatedAt: DateTime.now(),
     );
   }
@@ -227,6 +280,25 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     state = state.copyWith(textLayers: updated);
   }
 
+  void moveTextLayer(String id, double delta) {
+    final layerIndex = state.textLayers.indexWhere((l) => l.id == id);
+    if (layerIndex == -1) return;
+    
+    final layer = state.textLayers[layerIndex];
+    final duration = layer.endTime - layer.startTime;
+    double newStart = layer.startTime + delta;
+    double newEnd = layer.endTime + delta;
+
+    if (newStart < 0) {
+      newStart = 0;
+      newEnd = duration;
+    }
+    
+    final updated = List<TextLayerModel>.from(state.textLayers);
+    updated[layerIndex] = layer.copyWith(startTime: newStart, endTime: newEnd);
+    state = state.copyWith(textLayers: updated);
+  }
+
   // --- Media Layer Operations ---
 
   void addMediaLayer(MediaLayerModel media) {
@@ -305,8 +377,51 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     
     state = state.copyWith(
       mediaLayers: newLayers,
-      selectedLayerId: layer2.id, // auto-select the new second half
+      selectedLayerId: layer2.id,
     );
+  }
+
+  void trimMediaLayerStart(String id, double delta) {
+    final layerIndex = state.mediaLayers.indexWhere((l) => l.id == id);
+    if (layerIndex == -1) return;
+    
+    final layer = state.mediaLayers[layerIndex];
+    if (layer.mediaDuration - delta <= 0.5) return; // Prevent shrinking too small
+    
+    final updated = List<MediaLayerModel>.from(state.mediaLayers);
+    updated[layerIndex] = layer.copyWith(
+      startTime: layer.startTime + delta,
+      trimStartTime: layer.trimStartTime + delta,
+      mediaDuration: layer.mediaDuration - delta,
+    );
+    state = state.copyWith(mediaLayers: updated);
+  }
+
+  void trimMediaLayerEnd(String id, double delta) {
+    final layerIndex = state.mediaLayers.indexWhere((l) => l.id == id);
+    if (layerIndex == -1) return;
+    
+    final layer = state.mediaLayers[layerIndex];
+    if (layer.mediaDuration + delta <= 0.5) return;
+    
+    final updated = List<MediaLayerModel>.from(state.mediaLayers);
+    updated[layerIndex] = layer.copyWith(
+      mediaDuration: layer.mediaDuration + delta,
+    );
+    state = state.copyWith(mediaLayers: updated);
+  }
+
+  void moveMediaLayer(String id, double delta) {
+    final layerIndex = state.mediaLayers.indexWhere((l) => l.id == id);
+    if (layerIndex == -1) return;
+    
+    final layer = state.mediaLayers[layerIndex];
+    double newStart = layer.startTime + delta;
+    if (newStart < 0) newStart = 0;
+    
+    final updated = List<MediaLayerModel>.from(state.mediaLayers);
+    updated[layerIndex] = layer.copyWith(startTime: newStart);
+    state = state.copyWith(mediaLayers: updated);
   }
 
   void replaceMediaLayerPath(String id, String newPath, double newDuration) {
@@ -348,41 +463,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     state = state.copyWith(mediaLayers: updated);
   }
 
-  void trimMediaLayerStart(String id, double time) {
-    final layerIndex = state.mediaLayers.indexWhere((l) => l.id == id);
-    if (layerIndex == -1) return;
-    
-    final layer = state.mediaLayers[layerIndex];
-    if (time >= layer.startTime + layer.mediaDuration) return;
-    
-    pushHistory();
-    
-    final diff = time - layer.startTime;
-    final updated = List<MediaLayerModel>.from(state.mediaLayers);
-    updated[layerIndex] = layer.copyWith(
-      startTime: time,
-      trimStartTime: layer.trimStartTime + diff,
-      mediaDuration: layer.mediaDuration - diff,
-    );
-    state = state.copyWith(mediaLayers: updated);
-  }
 
-  void trimMediaLayerEnd(String id, double time) {
-    final layerIndex = state.mediaLayers.indexWhere((l) => l.id == id);
-    if (layerIndex == -1) return;
-    
-    final layer = state.mediaLayers[layerIndex];
-    if (time <= layer.startTime) return;
-    
-    pushHistory();
-    
-    final diff = time - layer.startTime;
-    final updated = List<MediaLayerModel>.from(state.mediaLayers);
-    updated[layerIndex] = layer.copyWith(
-      mediaDuration: diff,
-    );
-    state = state.copyWith(mediaLayers: updated);
-  }
 
   void deleteMediaLayer(String id) {
     pushHistory();
