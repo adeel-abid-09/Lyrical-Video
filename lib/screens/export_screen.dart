@@ -202,20 +202,22 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             Center(
               child: GestureDetector(
                 onTap: _isExporting ? null : _togglePlayPause,
-                child: Container(
-                  width: 210,
-                  height: 360,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1C1C26),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white12, width: 1.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.5),
-                        blurRadius: 20,
-                        spreadRadius: 4,
-                      ),
-                    ],
+                child: CustomPaint(
+                  painter: _isExporting ? _BorderProgressPainter(_progress, 16.0) : null,
+                  child: Container(
+                    width: 210,
+                    height: 360,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C1C26),
+                      borderRadius: BorderRadius.circular(16),
+                      border: !_isExporting ? Border.all(color: Colors.white12, width: 1.5) : null,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.5),
+                          blurRadius: 20,
+                          spreadRadius: 4,
+                        ),
+                      ],
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(14),
@@ -302,6 +304,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                 ),
               ),
             ),
+          ),
 
             const Spacer(),
 
@@ -360,7 +363,6 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       ),
     );
   }
-
   Widget _buildThumbnailWidget(MediaLayerModel media) {
     final path = media.path;
     if (kIsWeb || path.startsWith('blob:') || path.startsWith('http')) {
@@ -377,5 +379,48 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       );
     }
     return Container(color: const Color(0xFF1E1E2C));
+  }
+}
+
+class _BorderProgressPainter extends CustomPainter {
+  final double progress;
+  final double borderRadius;
+
+  _BorderProgressPainter(this.progress, this.borderRadius);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bgPaint = Paint()
+      ..color = Colors.white12
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    final progressPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round;
+
+    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(borderRadius));
+
+    // Draw background border
+    canvas.drawRRect(rrect, bgPaint);
+
+    if (progress <= 0) return;
+
+    // We can use a PathMetric to draw the progress
+    final path = Path()..addRRect(rrect);
+    final metrics = path.computeMetrics().toList();
+    if (metrics.isEmpty) return;
+
+    final metric = metrics.first;
+    final extractPath = metric.extractPath(0.0, metric.length * progress);
+    canvas.drawPath(extractPath, progressPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _BorderProgressPainter oldDelegate) {
+    return oldDelegate.progress != progress;
   }
 }

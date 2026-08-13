@@ -356,10 +356,10 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     }
     final updated = [...state.mediaLayers, media];
 
-    // If media duration > current project duration, extend project duration
+    // If media end time > current project duration, extend project duration
     double newDuration = state.duration;
-    if (media.mediaDuration > newDuration) {
-      newDuration = media.mediaDuration;
+    if ((media.startTime + media.mediaDuration) > newDuration) {
+      newDuration = media.startTime + media.mediaDuration;
     }
 
     state = state.copyWith(

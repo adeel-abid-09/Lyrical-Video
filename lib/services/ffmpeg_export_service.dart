@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/editor_project_model.dart';
 import '../models/media_layer_model.dart';
 import '../models/text_layer_model.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'font_manager_service.dart';
 
 class FFmpegExportService {
@@ -144,19 +146,39 @@ class FFmpegExportService {
     }
     cmd += ' $mapArgs -c:v libx264 $bitrateParam -pix_fmt yuv420p -c:a aac -shortest "$outputPath"';
 
-    final session = await FFmpegKit.execute(cmd);
-    final returnCode = await session.getReturnCode();
+    // We need to use executeAsync with a statisticsCallback to get progress
+    final completer = Completer<String?>();
+    
+    await FFmpegKit.executeAsync(
+      cmd,
+      (session) async {
+        final returnCode = await session.getReturnCode();
+        if (ReturnCode.isSuccess(returnCode)) {
+          try {
+            await _channel.invokeMethod('saveVideoToGallery', {'filePath': outputPath});
+          } catch (_) {}
+          completer.complete(outputPath);
+        } else {
+          final logs = await session.getLogsAsString();
+          final err = logs != null ? (logs.length > 1000 ? logs.substring(logs.length - 1000) : logs) : "Unknown error";
+          completer.completeError(Exception('FFmpeg export failed:\n...\n$err'));
+        }
+      },
+      (log) {}, // LogCallback
+      (statistics) { // StatisticsCallback
+        if (onProgress != null) {
+          final int timeInMs = statistics.getTime();
+          final double totalMs = project.duration * 1000;
+          if (timeInMs > 0 && totalMs > 0) {
+            double progress = timeInMs / totalMs;
+            if (progress > 1.0) progress = 1.0;
+            onProgress(progress);
+          }
+        }
+      },
+    );
 
-    if (ReturnCode.isSuccess(returnCode)) {
-      try {
-        await _channel.invokeMethod('saveVideoToGallery', {'filePath': outputPath});
-      } catch (_) {}
-      return outputPath;
-    } else {
-      final logs = await session.getLogsAsString();
-      final err = logs != null ? (logs.length > 1000 ? logs.substring(logs.length - 1000) : logs) : "Unknown error";
-      throw Exception('FFmpeg export failed:\n...\n$err');
-    }
+    return completer.future;
   }
 
   static Future<String> _generateTextImage(TextLayerModel textLayer, int targetWidth, int targetHeight) async {
@@ -177,24 +199,35 @@ class FFmpegExportService {
     // Multiply textLayer.scaleX by our target scale factor!
     canvas.scale(textLayer.scaleX * scaleFactor, textLayer.scaleY * scaleFactor);
 
+    final baseStyle = TextStyle(
+      fontSize: textLayer.fontSize,
+      color: textLayer.textColor,
+      fontWeight: textLayer.fontWeight,
+      fontStyle: textLayer.fontStyle,
+      letterSpacing: textLayer.letterSpacing,
+      shadows: [
+         Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), blurRadius: (textLayer.strokeColor != null ? textLayer.strokeWidth : 2.0) * 1.5),
+         Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(1, 1)),
+         Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(-1, -1)),
+         Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(1, -1)),
+         Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(-1, 1)),
+      ],
+    );
+
+    TextStyle finalStyle = baseStyle;
+    try {
+      if (textLayer.fontFamily != null && textLayer.fontFamily!.isNotEmpty) {
+        finalStyle = GoogleFonts.getFont(textLayer.fontFamily!, textStyle: baseStyle);
+      } else {
+        finalStyle = GoogleFonts.outfit(textStyle: baseStyle);
+      }
+    } catch (_) {
+      finalStyle = GoogleFonts.outfit(textStyle: baseStyle);
+    }
+
     final textSpan = TextSpan(
       text: textLayer.text,
-      style: TextStyle(
-        fontFamily: textLayer.fontFamily,
-        fontSize: textLayer.fontSize,
-        color: textLayer.textColor,
-        fontWeight: textLayer.fontWeight,
-        fontStyle: textLayer.fontStyle,
-        letterSpacing: textLayer.letterSpacing,
-        // Shadows exactly like interactive_canvas.dart
-        shadows: [
-           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), blurRadius: (textLayer.strokeColor != null ? textLayer.strokeWidth : 2.0) * 1.5),
-           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(1, 1)),
-           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(-1, -1)),
-           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(1, -1)),
-           Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(-1, 1)),
-        ],
-      ),
+      style: finalStyle,
     );
 
     final textPainter = TextPainter(
