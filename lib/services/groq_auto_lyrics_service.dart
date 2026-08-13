@@ -22,15 +22,17 @@ class AutoLyricItem {
 }
 
 class GroqAutoLyricsService {
-  static const String _apiUrl = 'https://api.groq.com/openai/v1/audio/translations';
+  static const String _apiUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
   
   static List<String> get _apiKeys {
     final keys = [
       dotenv.env['GROQ_API_KEY_1'] ?? '',
       dotenv.env['GROQ_API_KEY_2'] ?? '',
-      'gsk_YOUR_API_KEY_1',
-      'gsk_YOUR_API_KEY_2',
-    ].where((k) => k.trim().isNotEmpty).toList();
+      dotenv.env['GROQ_API_KEY_3'] ?? '',
+    ].where((k) => k.trim().isNotEmpty && !k.contains('YOUR_API_KEY')).toList();
+    if (keys.isEmpty) {
+      return [];
+    }
     return keys;
   }
   static const String _storageKey = 'groq_api_key';
@@ -40,12 +42,11 @@ class GroqAutoLyricsService {
   static Future<String> getApiKey() async {
     final prefs = await SharedPreferences.getInstance();
     final savedKey = prefs.getString(_storageKey);
-    if (savedKey != null && savedKey.trim().isNotEmpty) {
+    if (savedKey != null && savedKey.trim().isNotEmpty && !savedKey.contains('YOUR_API_KEY')) {
       return savedKey.trim();
     }
-    final envKey = _apiKeys[_currentKeyIndex % _apiKeys.length];
-    if (envKey.isNotEmpty) return envKey;
-    return 'gsk_c3qN2qB31209s092109312093810293';
+    final keys = _apiKeys;
+    return keys[_currentKeyIndex % keys.length];
   }
 
   static Future<void> saveApiKey(String key) async {
@@ -91,7 +92,7 @@ class GroqAutoLyricsService {
         }
       }
 
-      final uri = Uri.parse('https://api.groq.com/openai/v1/audio/transcriptions');
+      final uri = Uri.parse(_apiUrl);
       
       int maxRetries = _apiKeys.length;
       int attempts = 0;
@@ -132,25 +133,22 @@ class GroqAutoLyricsService {
                   final originalText = currentChunk.map((w) => w['word'].toString().trim()).join(' ');
                   
                   if (originalText.isNotEmpty) {
-                    final translatedText = await _translateChunkToEnglish(originalText, apiKey);
-                    if (translatedText.isNotEmpty) {
-                      lyricLayers.add(
-                        TextLayerModel(
-                          id: uuid.v4(),
-                          text: translatedText,
-                          position: const Offset(0.5, 0.75),
-                          fontSize: 26.0,
-                          textColor: const Color(0xFFFFFFFF),
-                          strokeColor: const Color(0xFF000000),
-                          strokeWidth: 3.0,
-                          startTime: chunkStart,
-                          endTime: chunkEnd > totalDuration ? totalDuration : chunkEnd,
-                          animation: TextAnimationType.fadeIn,
-                          isAutoLyric: true,
-                          zIndex: 10 + lyricLayers.length,
-                        ),
-                      );
-                    }
+                    lyricLayers.add(
+                      TextLayerModel(
+                        id: uuid.v4(),
+                        text: originalText,
+                        position: const Offset(0.5, 0.75),
+                        fontSize: 26.0,
+                        textColor: const Color(0xFFFFFFFF),
+                        strokeColor: const Color(0xFF000000),
+                        strokeWidth: 3.0,
+                        startTime: chunkStart,
+                        endTime: chunkEnd > totalDuration ? totalDuration : chunkEnd,
+                        animation: TextAnimationType.fadeIn,
+                        isAutoLyric: true,
+                        zIndex: 10 + lyricLayers.length,
+                      ),
+                    );
                   }
                   currentChunk = [];
                 }
@@ -169,9 +167,7 @@ class GroqAutoLyricsService {
                 double maxEnd = totalDuration > minEnd ? totalDuration : minEnd;
                 final segmentEnd = end.clamp(minEnd, maxEnd);
 
-                final translatedText = await _translateChunkToEnglish(text, apiKey);
-
-                final words = translatedText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+                final words = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
                 List<String> chunks = [];
                 for (int j = 0; j < words.length; j += 3) {
                   chunks.add(words.skip(j).take(3).join(' '));
@@ -217,10 +213,7 @@ class GroqAutoLyricsService {
                 final timePerLine = totalDuration / lines.length;
                 for (int k = 0; k < lines.length; k++) {
                   final lStart = k * timePerLine;
-                  
-                  final translatedText = await _translateChunkToEnglish(lines[k], apiKey);
-                  
-                  final words = translatedText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+                  final words = lines[k].split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
                   List<String> chunks = [];
                   for (int j = 0; j < words.length; j += 3) {
                     chunks.add(words.skip(j).take(3).join(' '));
@@ -264,6 +257,10 @@ class GroqAutoLyricsService {
             throw Exception('No spoken lyrics found in this video audio.');
           } else if (response.statusCode == 401 || response.statusCode == 429) {
             // API key expired or rate limited. Fallback to next key.
+            try {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove(_storageKey);
+            } catch (_) {}
             debugPrint('Groq API Key failed with status ${response.statusCode}. Trying next key...');
             _currentKeyIndex = (_currentKeyIndex + 1) % _apiKeys.length;
             attempts++;
@@ -295,58 +292,7 @@ class GroqAutoLyricsService {
     }
   }
 
-  /// Translates small Whisper transcript chunks into 100% pure, accurate English lyrics using Groq LLaMA 3.3 70B
-  static Future<String> _translateChunkToEnglish(String inputText, String apiKey) async {
-    final trimmed = inputText.trim();
-    if (trimmed.isEmpty) return trimmed;
 
-    try {
-      final response = await http.post(
-        Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
-        headers: {
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'llama-3.3-70b-versatile',
-          'messages': [
-            {
-              'role': 'system',
-              'content': 'Translate the following short audio transcription chunk to natural English. DO NOT output anything except the pure English translation. NO quotes, NO explanation, NO conversational text. Just the translated chunk.'
-            },
-            {
-              'role': 'user',
-              'content': trimmed,
-            }
-          ],
-          'temperature': 0.1,
-          'max_tokens': 100,
-        }),
-      ).timeout(const Duration(seconds: 3));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final translated = (data['choices'][0]['message']['content'] as String? ?? '').trim();
-        if (translated.isNotEmpty) {
-          final cleanText = translated.replaceAll(RegExp(r'^"|"$'), '').trim();
-          final lowerText = cleanText.toLowerCase();
-          if (lowerText.contains('transcribe') ||
-              lowerText.contains('translating') ||
-              lowerText.contains('translated') ||
-              lowerText.contains('spoken lyrics') ||
-              lowerText.contains('song lyrics') ||
-              lowerText.contains('clear, accurate') ||
-              lowerText.contains('line by line')) {
-            return trimmed;
-          }
-          return cleanText;
-        }
-      }
-    } catch (e) {
-      debugPrint('Groq LLaMA translation refinement fallback: $e');
-    }
-    return trimmed;
-  }
 
   /// Fetches lyrics online using Groq LLaMA 3.3 70B
   static Future<List<String>> fetchLyricsOnline(String songName) async {
