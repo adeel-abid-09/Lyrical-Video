@@ -99,6 +99,12 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     await prefs.remove('active_session_id');
   }
 
+  void updateProjectCanvasSize(double width, double height) {
+    if (state.canvasWidth != width || state.canvasHeight != height) {
+      state = state.copyWith(canvasWidth: width, canvasHeight: height);
+    }
+  }
+
   Future<void> saveAsDraft() async {
     _autoSaveTimer?.cancel();
     await ProjectStorageService.saveProject(state);

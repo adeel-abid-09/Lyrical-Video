@@ -18,6 +18,8 @@ class EditorProjectModel {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? exportedFilePath;
+  final double canvasWidth;
+  final double canvasHeight;
 
   const EditorProjectModel({
     required this.id,
@@ -35,6 +37,8 @@ class EditorProjectModel {
     required this.createdAt,
     required this.updatedAt,
     this.exportedFilePath,
+    this.canvasWidth = 400.0,
+    this.canvasHeight = 711.0,
   });
 
   EditorProjectModel copyWith({
@@ -53,6 +57,8 @@ class EditorProjectModel {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? exportedFilePath,
+    double? canvasWidth,
+    double? canvasHeight,
   }) {
     return EditorProjectModel(
       id: id ?? this.id,
@@ -70,6 +76,8 @@ class EditorProjectModel {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       exportedFilePath: exportedFilePath ?? this.exportedFilePath,
+      canvasWidth: canvasWidth ?? this.canvasWidth,
+      canvasHeight: canvasHeight ?? this.canvasHeight,
     );
   }
 
@@ -87,6 +95,8 @@ class EditorProjectModel {
       'queuedLyrics': queuedLyrics,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
+      'canvasWidth': canvasWidth,
+      'canvasHeight': canvasHeight,
     };
   }
 
@@ -111,6 +121,8 @@ class EditorProjectModel {
       isTrimMode: json['isTrimMode'] as bool? ?? false,
       createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt'] as String) : DateTime.now(),
       updatedAt: json['updatedAt'] != null ? DateTime.parse(json['updatedAt'] as String) : DateTime.now(),
+      canvasWidth: (json['canvasWidth'] as num? ?? 400.0).toDouble(),
+      canvasHeight: (json['canvasHeight'] as num? ?? 711.0).toDouble(),
     );
   }
 }

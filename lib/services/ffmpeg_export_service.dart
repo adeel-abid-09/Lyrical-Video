@@ -113,7 +113,7 @@ class FFmpegExportService {
       final text = textLayers[i];
       final nextLink = '[v_txt$i]';
       
-      final imagePath = await _generateTextImage(text, width, height);
+      final imagePath = await _generateTextImage(text, width, height, project.canvasWidth, project.canvasHeight);
       inputArgs.add('-i "$imagePath"');
       // inputArgs has 1 item per '-i' argument right now? Wait, no! 
       // Look at inputArgs collection above!
@@ -181,10 +181,9 @@ class FFmpegExportService {
     return completer.future;
   }
 
-  static Future<String> _generateTextImage(TextLayerModel textLayer, int targetWidth, int targetHeight) async {
-    // We assume a base logical canvas that matches a typical phone aspect ratio.
-    // The interactive canvas uses the device width. 400 is a safe estimate.
-    const double logicalWidth = 400.0;
+  static Future<String> _generateTextImage(TextLayerModel textLayer, int targetWidth, int targetHeight, double canvasWidth, double canvasHeight) async {
+    // We use the exact canvas width the user had while editing for 1:1 mapping.
+    final double logicalWidth = canvasWidth;
     
     final double scaleFactor = targetWidth / logicalWidth;
 

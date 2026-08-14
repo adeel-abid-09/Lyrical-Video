@@ -331,6 +331,14 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
             canvasW = maxH * targetRatio;
           }
 
+          if (project.canvasWidth != canvasW || project.canvasHeight != canvasH) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                notifier.updateProjectCanvasSize(canvasW, canvasH);
+              }
+            });
+          }
+
           return Center(
             child: SizedBox(
               width: canvasW,
