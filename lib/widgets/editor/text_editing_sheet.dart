@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/editor_state_notifier.dart';
 import '../../theme/app_theme.dart';
+import 'text_bubble_painter.dart';
 
 class TextEditingSheetWidget extends ConsumerStatefulWidget {
   final int initialIndex;
@@ -64,18 +65,32 @@ class _TextEditingSheetWidgetState extends ConsumerState<TextEditingSheetWidget>
     }
   }
 
-  void _updateLayerField({Color? bgColor, double? borderRadius}) {
+  void _updateLayerBubble(TextBubbleDefinition def) {
     final project = ref.read(editorProjectProvider);
     final selectedId = project.selectedLayerId;
     if (selectedId != null) {
       final existing = project.textLayers.where((t) => t.id == selectedId).firstOrNull;
       if (existing != null) {
-        ref.read(editorProjectProvider.notifier).updateTextLayer(
-          existing.copyWith(
-            backgroundColor: bgColor ?? existing.backgroundColor,
-            boxBorderRadius: borderRadius ?? existing.boxBorderRadius,
-          ),
-        );
+        if (def.id == 'none') {
+          ref.read(editorProjectProvider.notifier).updateTextLayer(
+            existing.copyWith(
+              clearBubble: true,
+              clearBackground: true,
+              clearBoxSize: true,
+              textColor: Colors.white,
+            ),
+          );
+        } else {
+          ref.read(editorProjectProvider.notifier).updateTextLayer(
+            existing.copyWith(
+              bubbleStyle: def.id,
+              clearBoxSize: true,
+              clearStroke: true,
+              textColor: def.defaultTextColor,
+              backgroundColor: def.defaultBgColor,
+            ),
+          );
+        }
       }
     }
   }
@@ -83,13 +98,16 @@ class _TextEditingSheetWidgetState extends ConsumerState<TextEditingSheetWidget>
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final project = ref.watch(editorProjectProvider);
+    final selectedId = project.selectedLayerId;
+    final selectedText = project.textLayers.where((t) => t.id == selectedId).firstOrNull;
 
     return Container(
-      padding: EdgeInsets.only(
+      padding: const EdgeInsets.only(
         left: 16,
         right: 16,
         top: 12,
-        bottom: bottomInset + 12,
+        bottom: 12,
       ),
       decoration: const BoxDecoration(
         color: Color(0xFF18181C),
@@ -138,48 +156,25 @@ class _TextEditingSheetWidgetState extends ConsumerState<TextEditingSheetWidget>
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          // Bubble Styling Row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              const Text('Bubble Style:', style: TextStyle(color: Colors.white70, fontSize: 14)),
-              _buildBubbleColorBtn(Colors.transparent, 'None'),
-              _buildBubbleColorBtn(Colors.white, 'White'),
-              _buildBubbleColorBtn(Colors.black87, 'Black'),
-              _buildBubbleColorBtn(Colors.blueAccent, 'Blue'),
-              Container(width: 1, height: 24, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 8)),
-              IconButton(
-                icon: const Icon(Icons.crop_square_rounded, color: Colors.white),
-                onPressed: () => _updateLayerField(borderRadius: 0.0),
-                tooltip: 'Square',
-              ),
-              IconButton(
-                icon: const Icon(Icons.rounded_corner_rounded, color: Colors.white),
-                onPressed: () => _updateLayerField(borderRadius: 24.0),
-                tooltip: 'Rounded',
-              ),
-            ],
+          const SizedBox(height: 12),
+          // Quick Bubble Styles (Horizontal Scrollable)
+          SizedBox(
+            height: 56,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              children: TextBubbleRegistry.bubbles.map((def) {
+                final isSelected = (selectedText?.bubbleStyle == def.id) ||
+                    (def.id == 'none' && (selectedText?.bubbleStyle == null || selectedText?.bubbleStyle == 'none'));
+                return TextBubblePreviewTile(
+                  def: def,
+                  isSelected: isSelected,
+                  onTap: () => _updateLayerBubble(def),
+                );
+              }).toList(),
+            ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildBubbleColorBtn(Color color, String label) {
-    return InkWell(
-      onTap: () => _updateLayerField(bgColor: color),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white38),
-        ),
-        alignment: Alignment.center,
-        child: color == Colors.transparent ? const Icon(Icons.do_not_disturb, size: 16, color: Colors.white) : null,
       ),
     );
   }

@@ -153,7 +153,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
         }
       },
       child: Scaffold(
-        resizeToAvoidBottomInset: true,
+        resizeToAvoidBottomInset: false,
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_rounded),
@@ -206,41 +206,55 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => ref.read(editorProjectProvider.notifier).selectLayer(null),
-          child: Column(
-          children: [
-            // 1. Constrained Video Preview Viewport
-            Expanded(
-              flex: 5,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: InteractiveCanvasWidget(
-                  onOpenTextEditor: ({int initialIndex = 0}) => _openTextEditor(initialIndex: initialIndex),
+          child: Stack(
+            children: [
+              // 1. Permanent Full-Height Editor Layout (Canvas + Timeline + Toolbar)
+              Column(
+                children: [
+                  // Constrained Video Preview Viewport
+                  Expanded(
+                    flex: 5,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: InteractiveCanvasWidget(
+                        onOpenTextEditor: ({int initialIndex = 0}) => _openTextEditor(initialIndex: initialIndex),
+                      ),
+                    ),
+                  ),
+
+                  // CapCut Style Timeline
+                  const SizedBox(
+                    height: 160,
+                    child: CapCutTimelineWidget(),
+                  ),
+
+                  // Multi-Tier Horizontal Toolbar
+                  HorizontalToolbarsWidget(
+                    onOpenTextEditor: ({int initialIndex = 0}) => _openTextEditor(initialIndex: initialIndex),
+                    onOpenManualLyrics: () => _openManualLyricsSync(context),
+                    onOpenLayersPanel: () => _openLayersPanel(context),
+                    onOpenRatioSelector: () => _openRatioSelector(context),
+                  ),
+                ],
+              ),
+
+              // 2. Floating Text Editor Overlay (Sits directly above keyboard without shrinking canvas)
+              if (_isTextEditorOpen)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
+                  child: Material(
+                    elevation: 16,
+                    color: Colors.transparent,
+                    child: TextEditingSheetWidget(
+                      initialIndex: _textEditorInitialIndex,
+                      onDone: _closeTextEditor,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-
-            if (_isTextEditorOpen)
-              TextEditingSheetWidget(
-                initialIndex: _textEditorInitialIndex,
-                onDone: _closeTextEditor,
-              )
-            else ...[
-              // 2. CapCut Style Timeline
-              const SizedBox(
-                height: 160,
-                child: CapCutTimelineWidget(),
-              ),
-
-              // 3. Multi-Tier Horizontal Toolbar
-              HorizontalToolbarsWidget(
-                onOpenTextEditor: ({int initialIndex = 0}) => _openTextEditor(initialIndex: initialIndex),
-                onOpenManualLyrics: () => _openManualLyricsSync(context),
-                onOpenLayersPanel: () => _openLayersPanel(context),
-                onOpenRatioSelector: () => _openRatioSelector(context),
-              ),
-            ]
-          ],
-        ),
+            ],
+          ),
         ),
       ), // close SafeArea
       floatingActionButton: project.queuedLyrics.isEmpty ? null : FloatingActionButton.extended(

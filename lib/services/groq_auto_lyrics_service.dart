@@ -140,13 +140,11 @@ class GroqAutoLyricsService {
                         position: const Offset(0.5, 0.75),
                         fontSize: 26.0,
                         textColor: const Color(0xFFFFFFFF),
-                        strokeColor: const Color(0xFF000000),
-                        strokeWidth: 3.0,
                         startTime: chunkStart,
                         endTime: chunkEnd > totalDuration ? totalDuration : chunkEnd,
-                        animation: TextAnimationType.fadeIn,
+                        animation: TextAnimationType.none,
                         isAutoLyric: true,
-                        zIndex: 10 + lyricLayers.length,
+                        zIndex: 0,
                       ),
                     );
                   }
@@ -191,13 +189,11 @@ class GroqAutoLyricsService {
                       position: const Offset(0.5, 0.75),
                       fontSize: 26.0,
                       textColor: const Color(0xFFFFFFFF),
-                      strokeColor: const Color(0xFF000000),
-                      strokeWidth: 3.0,
                       startTime: chunkStart,
                       endTime: segmentEndChunk > totalDuration ? totalDuration : segmentEndChunk,
-                      animation: TextAnimationType.fadeIn,
+                      animation: TextAnimationType.none,
                       isAutoLyric: true,
-                      zIndex: 10 + lyricLayers.length,
+                      zIndex: 0,
                     ),
                   );
                 }
@@ -237,13 +233,11 @@ class GroqAutoLyricsService {
                         position: const Offset(0.5, 0.75),
                         fontSize: 26.0,
                         textColor: const Color(0xFFFFFFFF),
-                        strokeColor: const Color(0xFF000000),
-                        strokeWidth: 3.0,
                         startTime: chunkStart,
                         endTime: segmentEndChunk > totalDuration ? totalDuration : segmentEndChunk,
-                        animation: TextAnimationType.fadeIn,
+                        animation: TextAnimationType.none,
                         isAutoLyric: true,
-                        zIndex: 10 + lyricLayers.length,
+                        zIndex: 0,
                       ),
                     );
                   }

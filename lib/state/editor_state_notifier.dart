@@ -188,7 +188,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     
     // Offset new layers so they don't overlap completely
     final existingLayers = state.textLayers.length;
-    final yOffset = 0.5 + ((existingLayers % 5) * 0.08); // Drops slightly lower each time
+    final yOffset = 0.40 + ((existingLayers % 4) * 0.05); // Placed higher in center
     final finalPos = position == const Offset(0.5, 0.5) ? Offset(0.5, yOffset) : position;
 
     final start = state.currentPlayheadTime;
@@ -201,13 +201,25 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
       // Let's just set end to start + 3.0.
     }
 
+    // Find lowest available track (starting at Track 0 directly below audio)
+    int assignedTrack = 0;
+    while (true) {
+      final hasOverlap = state.textLayers.any((l) =>
+        l.zIndex == assignedTrack &&
+        start < l.endTime &&
+        end > l.startTime
+      );
+      if (!hasOverlap) break;
+      assignedTrack++;
+    }
+
     final newLayer = TextLayerModel(
       id: const Uuid().v4(),
       text: text,
       position: finalPos,
       startTime: start,
       endTime: end,
-      zIndex: state.textLayers.length + 10,
+      zIndex: assignedTrack,
     );
 
     final updated = [...state.textLayers, newLayer];
@@ -252,7 +264,24 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
 
   void addTextLayers(List<TextLayerModel> layers) {
     pushHistory();
-    final updated = [...state.textLayers, ...layers];
+    final List<TextLayerModel> assigned = [];
+    final currentLayers = List<TextLayerModel>.from(state.textLayers);
+    
+    for (final layer in layers) {
+      int track = 0;
+      while (true) {
+        final hasOverlap = [...currentLayers, ...assigned].any((l) =>
+          l.zIndex == track &&
+          layer.startTime < l.endTime &&
+          layer.endTime > l.startTime
+        );
+        if (!hasOverlap) break;
+        track++;
+      }
+      assigned.add(layer.copyWith(zIndex: track));
+    }
+
+    final updated = [...state.textLayers, ...assigned];
     state = state.copyWith(
       textLayers: updated,
       updatedAt: DateTime.now(),

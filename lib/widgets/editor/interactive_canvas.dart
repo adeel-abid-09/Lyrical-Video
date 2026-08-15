@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +15,7 @@ import '../../models/aspect_ratio_model.dart';
 import '../../models/text_layer_model.dart';
 import '../../state/editor_state_notifier.dart';
 import '../../theme/app_theme.dart';
+import 'text_bubble_painter.dart';
 
 class InteractiveCanvasWidget extends ConsumerStatefulWidget {
   final void Function({int initialIndex})? onOpenTextEditor;
@@ -31,7 +33,6 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
   final Map<String, VideoPlayerController> _videoControllers = {};
   final Map<String, AudioPlayer> _audioPlayers = {};
   Timer? _playbackTimer;
-  DateTime? _seekIgnoreTimerUntil;
   final ImagePicker _picker = ImagePicker();
 
   // For text gesture tracking
@@ -46,9 +47,6 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     _playbackTimer = Timer.periodic(const Duration(milliseconds: 32), (timer) {
       final project = ref.read(editorProjectProvider);
       if (project.isPlaying && !project.isScrubbing) {
-        if (_seekIgnoreTimerUntil != null && DateTime.now().isBefore(_seekIgnoreTimerUntil!)) {
-          return;
-        }
 
         final newTime = project.currentPlayheadTime + 0.032;
         final notifier = ref.read(editorProjectProvider.notifier);
@@ -153,7 +151,10 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     );
   }
 
-  void _syncMediaControllers(List<MediaLayerModel> videoLayers, List<MediaLayerModel> audioLayers, bool isPlaying, double currentPlayheadTime) {
+  double _lastSyncedPlayheadTime = 0.0;
+  DateTime? _lastScrubSeekTime;
+
+  void _syncMediaControllers(List<MediaLayerModel> videoLayers, List<MediaLayerModel> audioLayers, bool isPlaying, double currentPlayheadTime, bool isScrubbing) {
     // 1. Initialize any missing controllers for VIDEO
     for (final layer in videoLayers) {
       if (!_videoControllers.containsKey(layer.id)) {
@@ -172,6 +173,9 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
         _videoControllers[layer.id] = ctrl;
         ctrl.initialize().then((_) {
           if (mounted) {
+            final initLayerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
+            final clamped = initLayerTime.clamp(layer.trimStartTime, layer.trimStartTime + layer.mediaDuration);
+            ctrl.seekTo(Duration(milliseconds: (clamped * 1000).toInt()));
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) setState(() {});
             });
@@ -184,7 +188,11 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     for (final layer in audioLayers) {
       if (!_audioPlayers.containsKey(layer.id)) {
         final p = AudioPlayer();
-        p.setFilePath(layer.path).catchError((_) {});
+        p.setFilePath(layer.path).then((_) {
+          final initLayerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
+          final clamped = initLayerTime.clamp(layer.trimStartTime, layer.trimStartTime + layer.mediaDuration);
+          p.seek(Duration(milliseconds: (clamped * 1000).toInt()));
+        }).catchError((_) {});
         _audioPlayers[layer.id] = p;
       }
     }
@@ -202,12 +210,38 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
       _audioPlayers.remove(id);
     });
 
-    // 3. Sync states for VIDEO
+    // 3. Determine if we need to explicitly seek all media controllers
+    bool shouldSeek = false;
+    if (!isPlaying) {
+      // When paused, ANY change in playhead time must seek to show the exact frame
+      if ((currentPlayheadTime - _lastSyncedPlayheadTime).abs() > 0.001) {
+        shouldSeek = true;
+      }
+    } else if (isScrubbing) {
+      // While actively scrubbing during playback, throttle seeking to 50ms so ExoPlayer doesn't get overloaded
+      final now = DateTime.now();
+      if (_lastScrubSeekTime == null || now.difference(_lastScrubSeekTime!).inMilliseconds >= 50) {
+        shouldSeek = true;
+        _lastScrubSeekTime = now;
+      }
+    } else {
+      // While playing normally: only seek if playhead jumped (e.g. 5s skip button, or scrub release)
+      final delta = currentPlayheadTime - _lastSyncedPlayheadTime;
+      // Normal playback delta is ~0.032s. A jump is backwards (< 0) or forwards (> 0.12s)
+      if (delta < -0.01 || delta > 0.12) {
+        shouldSeek = true;
+      }
+    }
+
+    _lastSyncedPlayheadTime = currentPlayheadTime;
+
+    // 4. Sync states & perform seek for VIDEO
     for (final layer in videoLayers) {
       final ctrl = _videoControllers[layer.id];
       if (ctrl != null && ctrl.value.isInitialized) {
-        final layerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
-        final shouldBePlayingThisLayer = isPlaying && 
+        final rawLayerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
+        final targetLayerTime = rawLayerTime.clamp(layer.trimStartTime, layer.trimStartTime + layer.mediaDuration);
+        final shouldBePlayingThisLayer = isPlaying && !isScrubbing &&
                                          currentPlayheadTime >= layer.startTime && 
                                          currentPlayheadTime <= layer.startTime + layer.mediaDuration;
 
@@ -220,34 +254,25 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
           ctrl.setPlaybackSpeed(layer.playbackSpeed);
         }
 
+        if (shouldSeek) {
+          ctrl.seekTo(Duration(milliseconds: (targetLayerTime * 1000).toInt()));
+        }
+
         if (shouldBePlayingThisLayer && !ctrl.value.isPlaying) {
           ctrl.play();
         } else if (!shouldBePlayingThisLayer && ctrl.value.isPlaying) {
           ctrl.pause();
         }
-
-        final currentPos = ctrl.value.position.inMilliseconds / 1000.0;
-        if (!isPlaying) {
-          if ((currentPos - layerTime).abs() > 0.1) {
-            if (_seekIgnoreTimerUntil == null || DateTime.now().isAfter(_seekIgnoreTimerUntil!)) {
-              _seekIgnoreTimerUntil = DateTime.now().add(const Duration(milliseconds: 350));
-              if (layerTime >= layer.trimStartTime && layerTime <= layer.trimStartTime + layer.mediaDuration) {
-                 ctrl.seekTo(Duration(milliseconds: (layerTime * 1000).toInt()));
-              } else {
-                 ctrl.seekTo(Duration(milliseconds: (layer.trimStartTime * 1000).toInt()));
-              }
-            }
-          }
-        }
       }
     }
     
-    // 4. Sync states for AUDIO
+    // 5. Sync states & perform seek for AUDIO
     for (final layer in audioLayers) {
       final p = _audioPlayers[layer.id];
       if (p != null) {
-        final layerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
-        final shouldBePlayingThisLayer = isPlaying && 
+        final rawLayerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
+        final targetLayerTime = rawLayerTime.clamp(layer.trimStartTime, layer.trimStartTime + layer.mediaDuration);
+        final shouldBePlayingThisLayer = isPlaying && !isScrubbing &&
                                          currentPlayheadTime >= layer.startTime && 
                                          currentPlayheadTime <= layer.startTime + layer.mediaDuration;
 
@@ -256,24 +281,14 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
           p.setVolume(targetVolume);
         }
 
+        if (shouldSeek) {
+          p.seek(Duration(milliseconds: (targetLayerTime * 1000).toInt()));
+        }
+
         if (shouldBePlayingThisLayer && !p.playing) {
           p.play();
         } else if (!shouldBePlayingThisLayer && p.playing) {
           p.pause();
-        }
-
-        final currentPos = p.position.inMilliseconds / 1000.0;
-        if (!isPlaying) {
-          if ((currentPos - layerTime).abs() > 0.1) {
-            if (_seekIgnoreTimerUntil == null || DateTime.now().isAfter(_seekIgnoreTimerUntil!)) {
-              _seekIgnoreTimerUntil = DateTime.now().add(const Duration(milliseconds: 350));
-              if (layerTime >= layer.trimStartTime && layerTime <= layer.trimStartTime + layer.mediaDuration) {
-                 p.seek(Duration(milliseconds: (layerTime * 1000).toInt()));
-              } else {
-                 p.seek(Duration(milliseconds: (layer.trimStartTime * 1000).toInt()));
-              }
-            }
-          }
         }
       }
     }
@@ -305,7 +320,7 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     final audioLayers = project.mediaLayers.where((m) => m.type == MediaType.audio).toList();
     final imageLayers = project.mediaLayers.where((m) => m.type == MediaType.sticker).toList();
 
-    _syncMediaControllers(videoLayers, audioLayers, project.isPlaying, project.currentPlayheadTime);
+    _syncMediaControllers(videoLayers, audioLayers, project.isPlaying, project.currentPlayheadTime, project.isScrubbing);
 
     final targetRatio = project.aspectRatio.ratio;
 
@@ -543,64 +558,165 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                     recordHistory: false,
                                   );
                                 },
-                                child: Transform.rotate(
-                                  angle: textLayer.rotation,
-                                  child: Transform.scale(
-                                    scale: textLayer.scaleX,
-                                    child: Stack(
-                                      clipBehavior: Clip.none,
-                                      children: [
-                                        // Text Box Border & Content Container
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                                          decoration: BoxDecoration(
-                                            color: textLayer.backgroundColor,
-                                            borderRadius: BorderRadius.circular(textLayer.boxBorderRadius),
-                                            border: isSelected ? Border.all(color: Colors.white.withOpacity(0.8), width: 1.0) : null,
-                                          ),
-                                          width: textLayer.boxWidth,
-                                          height: textLayer.boxHeight,
-                                          constraints: BoxConstraints(
-                                            minWidth: 120.0,
-                                            minHeight: 48.0,
-                                            maxWidth: (canvasW * 0.95).clamp(120.0, canvasW),
-                                          ),
-                                          alignment: Alignment.center,
-                                          child: Text(
-                                            textLayer.text,
-                                            textAlign: textLayer.textAlign,
-                                            softWrap: true,
-                                            style: () {
-                                              final baseStyle = TextStyle(
-                                                fontSize: textLayer.fontSize,
-                                                color: textLayer.textColor,
-                                                fontWeight: textLayer.fontWeight,
-                                                fontStyle: textLayer.fontStyle,
-                                                letterSpacing: textLayer.letterSpacing,
-                                                shadows: [
-                                                  Shadow(
-                                                    color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9),
-                                                    blurRadius: (textLayer.strokeColor != null ? textLayer.strokeWidth : 2.0) * 1.5,
-                                                  ),
-                                                  Shadow(
-                                                    color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9),
-                                                    offset: const Offset(1, 1),
-                                                  ),
-                                                  Shadow(
-                                                    color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9),
-                                                    offset: const Offset(-1, -1),
-                                                  ),
-                                                ],
-                                              );
-                                              try {
-                                                if (textLayer.fontFamily != null && textLayer.fontFamily!.isNotEmpty) {
-                                                  return GoogleFonts.getFont(textLayer.fontFamily!, textStyle: baseStyle);
-                                                }
-                                              } catch (_) {}
-                                              return GoogleFonts.outfit(textStyle: baseStyle);
-                                            }(),
-                                          ),
-                                        ),
+                                child: Builder(
+                                  builder: (context) {
+                                    final timeSinceStart = (project.currentPlayheadTime - textLayer.startTime).clamp(0.0, double.infinity);
+                                    final animProgress = (timeSinceStart / 0.55).clamp(0.0, 1.0);
+
+                                    double liveOpacity = textLayer.opacity.clamp(0.0, 1.0);
+                                    double liveScale = textLayer.scaleX;
+                                    double liveTranslateY = 0.0;
+                                    double liveRotateAngle = textLayer.rotation;
+                                    String liveText = textLayer.text;
+                                    List<Shadow>? liveGlowShadows;
+
+                                    switch (textLayer.animation) {
+                                      case TextAnimationType.none:
+                                        break;
+                                      case TextAnimationType.fadeIn:
+                                        liveOpacity *= Curves.easeIn.transform(animProgress);
+                                        break;
+                                      case TextAnimationType.popIn:
+                                        final s = animProgress < 0.8
+                                            ? (animProgress / 0.8) * 1.2
+                                            : 1.2 - ((animProgress - 0.8) / 0.2) * 0.2;
+                                        liveScale *= s.clamp(0.01, 1.3);
+                                        break;
+                                      case TextAnimationType.blurIn:
+                                        final s = 0.7 + (Curves.easeOut.transform(animProgress) * 0.3);
+                                        liveScale *= s;
+                                        liveOpacity *= animProgress.clamp(0.05, 1.0);
+                                        break;
+                                      case TextAnimationType.slideUp:
+                                        liveTranslateY = (1.0 - Curves.easeOutCubic.transform(animProgress)) * 30.0;
+                                        liveOpacity *= animProgress;
+                                        break;
+                                      case TextAnimationType.slideDown:
+                                        liveTranslateY = -(1.0 - Curves.easeOutCubic.transform(animProgress)) * 30.0;
+                                        liveOpacity *= animProgress;
+                                        break;
+                                      case TextAnimationType.typewriter:
+                                        final count = (textLayer.text.length * animProgress).clamp(1, textLayer.text.length).toInt();
+                                        liveText = textLayer.text.substring(0, count);
+                                        break;
+                                      case TextAnimationType.bounce:
+                                        final b = Curves.bounceOut.transform(animProgress);
+                                        liveTranslateY = (1.0 - b) * -25.0;
+                                        break;
+                                      case TextAnimationType.glow:
+                                        final radius = (sin(timeSinceStart * pi * 3).abs() * 8.0) + 2.0;
+                                        liveGlowShadows = [
+                                          Shadow(color: Colors.white, blurRadius: radius),
+                                          Shadow(color: const Color(0xFF00E5FF), blurRadius: radius * 1.5),
+                                        ];
+                                        break;
+                                      case TextAnimationType.stamp:
+                                        final s = animProgress < 0.6
+                                            ? 2.2 - (Curves.easeInQuad.transform(animProgress / 0.6) * 1.2)
+                                            : 1.0;
+                                        liveScale *= s;
+                                        break;
+                                      case TextAnimationType.zoomIn:
+                                        liveScale *= Curves.easeOutBack.transform(animProgress).clamp(0.01, 1.2);
+                                        break;
+                                      case TextAnimationType.wave:
+                                        liveRotateAngle += sin(animProgress * pi * 2) * 0.12;
+                                        break;
+                                    }
+
+                                    return Transform.translate(
+                                      offset: Offset(0, liveTranslateY),
+                                      child: Transform.rotate(
+                                        angle: liveRotateAngle,
+                                        child: Transform.scale(
+                                          scale: liveScale,
+                                          child: Opacity(
+                                            opacity: liveOpacity,
+                                            child: Stack(
+                                              clipBehavior: Clip.none,
+                                              children: [
+                                                // Text Box Border & Content Container
+                                                Builder(
+                                                  builder: (context) {
+                                                    final hasBubble = textLayer.bubbleStyle != null && textLayer.bubbleStyle != 'none';
+
+                                                    final textWidget = Padding(
+                                                      padding: EdgeInsets.symmetric(
+                                                        horizontal: hasBubble ? 24.0 : 16.0, 
+                                                        vertical: hasBubble ? 12.0 : 8.0,
+                                                      ),
+                                                      child: Text(
+                                                        liveText,
+                                                        textAlign: textLayer.textAlign,
+                                                        softWrap: true,
+                                                        style: () {
+                                                          final baseStyle = TextStyle(
+                                                            fontSize: textLayer.fontSize,
+                                                            color: textLayer.textColor,
+                                                            fontWeight: textLayer.fontWeight,
+                                                            fontStyle: textLayer.fontStyle,
+                                                            letterSpacing: textLayer.letterSpacing,
+                                                            shadows: liveGlowShadows ?? [
+                                                              Shadow(
+                                                                color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9),
+                                                                blurRadius: (textLayer.strokeColor != null ? textLayer.strokeWidth : 2.0) * 1.5,
+                                                              ),
+                                                              Shadow(
+                                                                color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9),
+                                                                offset: const Offset(1, 1),
+                                                              ),
+                                                              Shadow(
+                                                                color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9),
+                                                                offset: const Offset(-1, -1),
+                                                              ),
+                                                            ],
+                                                          );
+                                                          try {
+                                                            if (textLayer.fontFamily != null && textLayer.fontFamily!.isNotEmpty) {
+                                                              return GoogleFonts.getFont(textLayer.fontFamily!, textStyle: baseStyle);
+                                                            }
+                                                          } catch (_) {}
+                                                          return GoogleFonts.outfit(textStyle: baseStyle);
+                                                        }(),
+                                                      ),
+                                                    );
+
+                                               if (hasBubble) {
+                                                 return CustomPaint(
+                                                   painter: BubbleShapePainter(
+                                                     styleId: textLayer.bubbleStyle!,
+                                                     customColor: textLayer.backgroundColor,
+                                                   ),
+                                                   child: Container(
+                                                     width: textLayer.boxWidth,
+                                                     height: textLayer.boxHeight,
+                                                     constraints: BoxConstraints(
+                                                       minWidth: 40.0,
+                                                       minHeight: 30.0,
+                                                       maxWidth: (canvasW * 0.95).clamp(40.0, canvasW),
+                                                     ),
+                                                     child: textWidget,
+                                                   ),
+                                                 );
+                                               }
+
+                                               return Container(
+                                                 decoration: BoxDecoration(
+                                                   color: textLayer.backgroundColor,
+                                                   borderRadius: BorderRadius.circular(textLayer.boxBorderRadius),
+                                                   border: isSelected ? Border.all(color: Colors.white.withOpacity(0.8), width: 1.0) : null,
+                                                 ),
+                                                 width: textLayer.boxWidth,
+                                                 height: textLayer.boxHeight,
+                                                 constraints: BoxConstraints(
+                                                   minWidth: 40.0,
+                                                   minHeight: 30.0,
+                                                   maxWidth: (canvasW * 0.95).clamp(40.0, canvasW),
+                                                 ),
+                                                 child: textWidget,
+                                               );
+                                             },
+                                           ),
 
                                         // Handles when Selected
                                         if (isSelected) ...[
@@ -611,74 +727,73 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                             const Alignment(-1, 1),  // Bottom-Left
                                             const Alignment(1, 1),   // Bottom-Right
                                           ].map((align) {
-                                            return Positioned(
-                                              left: align.x == -1 ? -6 : null,
-                                              right: align.x == 1 ? -6 : null,
-                                              top: align.y == -1 ? -6 : null,
-                                              bottom: align.y == 1 ? -6 : null,
-                                              child: GestureDetector(
-                                                behavior: HitTestBehavior.opaque,
-                                                onPanStart: (_) => notifier.pushHistory(),
-                                                onPanUpdate: (details) {
-                                                  // Simple scaling based on diagonal drag distance
-                                                  final direction = align.x * align.y; // positive for TR/BL, negative for TL/BR
-                                                  double delta = 0;
-                                                  if (align.x == 1 && align.y == 1) { // BR
-                                                    delta = (details.delta.dx + details.delta.dy) * 0.005;
-                                                  } else if (align.x == -1 && align.y == -1) { // TL
-                                                    delta = -(details.delta.dx + details.delta.dy) * 0.005;
-                                                  } else if (align.x == 1 && align.y == -1) { // TR
-                                                    delta = (details.delta.dx - details.delta.dy) * 0.005;
-                                                  } else if (align.x == -1 && align.y == 1) { // BL
-                                                    delta = (-details.delta.dx + details.delta.dy) * 0.005;
-                                                  }
-                                                  
-                                                  final newScale = (textLayer.scaleX + delta).clamp(0.2, 5.0);
-                                                  final newFontSize = (textLayer.fontSize + delta * 20).clamp(12.0, 150.0);
-                                                  notifier.updateTextLayer(textLayer.copyWith(scaleX: newScale, fontSize: newFontSize), recordHistory: false);
-                                                },
-                                                child: Container(
-                                                  width: 12, height: 12,
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white,
-                                                    shape: BoxShape.circle,
-                                                    border: Border.all(color: Colors.black26, width: 1),
-                                                  ),
-                                                ),
-                                              ),
-                                            );
-                                          }),
+                                             return Positioned(
+                                               left: align.x == -1 ? -8 : null,
+                                               right: align.x == 1 ? -8 : null,
+                                               top: align.y == -1 ? -8 : null,
+                                               bottom: align.y == 1 ? -8 : null,
+                                               child: GestureDetector(
+                                                 behavior: HitTestBehavior.opaque,
+                                                 onPanStart: (_) => notifier.pushHistory(),
+                                                 onPanUpdate: (details) {
+                                                   // Simple scaling based on diagonal drag distance
+                                                   double delta = 0;
+                                                   if (align.x == 1 && align.y == 1) { // BR
+                                                     delta = (details.delta.dx + details.delta.dy) * 0.005;
+                                                   } else if (align.x == -1 && align.y == -1) { // TL
+                                                     delta = -(details.delta.dx + details.delta.dy) * 0.005;
+                                                   } else if (align.x == 1 && align.y == -1) { // TR
+                                                     delta = (details.delta.dx - details.delta.dy) * 0.005;
+                                                   } else if (align.x == -1 && align.y == 1) { // BL
+                                                     delta = (-details.delta.dx + details.delta.dy) * 0.005;
+                                                   }
+                                                   
+                                                   final newScale = (textLayer.scaleX + delta).clamp(0.2, 5.0);
+                                                   final newFontSize = (textLayer.fontSize + delta * 20).clamp(12.0, 150.0);
+                                                   notifier.updateTextLayer(textLayer.copyWith(scaleX: newScale, fontSize: newFontSize), recordHistory: false);
+                                                 },
+                                                 child: Container(
+                                                   width: 12, height: 12,
+                                                   decoration: BoxDecoration(
+                                                     color: Colors.white,
+                                                     shape: BoxShape.circle,
+                                                     border: Border.all(color: Colors.black26, width: 1),
+                                                   ),
+                                                 ),
+                                               ),
+                                             );
+                                           }),
 
-                                          // --- Left and Right Pill Handles for Width Adjust ---
-                                          ...[
-                                            const Alignment(-1, 0), // Left
-                                            const Alignment(1, 0),  // Right
-                                          ].map((align) {
-                                            return Positioned(
-                                              left: align.x == -1 ? -6 : null,
-                                              right: align.x == 1 ? -6 : null,
-                                              top: 0, bottom: 0,
-                                              child: Center(
-                                                child: GestureDetector(
-                                                  behavior: HitTestBehavior.opaque,
-                                                  onPanStart: (_) => notifier.pushHistory(),
-                                                  onPanUpdate: (details) {
-                                                    final delta = align.x == 1 ? details.delta.dx : -details.delta.dx;
-                                                    final newWidth = ((textLayer.boxWidth ?? 120.0) + delta * 2).clamp(60.0, canvasW);
-                                                    notifier.updateTextLayer(textLayer.copyWith(boxWidth: newWidth), recordHistory: false);
-                                                  },
-                                                  child: Container(
-                                                    width: 12, height: 24,
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.white,
-                                                      borderRadius: BorderRadius.circular(6),
-                                                      border: Border.all(color: Colors.black26, width: 1),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            );
-                                          }),
+                                           // --- Left and Right Pill Handles for Width Adjust ---
+                                           ...[
+                                             const Alignment(-1, 0), // Left
+                                             const Alignment(1, 0),  // Right
+                                           ].map((align) {
+                                             return Positioned(
+                                               left: align.x == -1 ? -8 : null,
+                                               right: align.x == 1 ? -8 : null,
+                                               top: 0, bottom: 0,
+                                               child: Center(
+                                                 child: GestureDetector(
+                                                   behavior: HitTestBehavior.opaque,
+                                                   onPanStart: (_) => notifier.pushHistory(),
+                                                   onPanUpdate: (details) {
+                                                     final delta = align.x == 1 ? details.delta.dx : -details.delta.dx;
+                                                     final newWidth = ((textLayer.boxWidth ?? 120.0) + delta * 2).clamp(60.0, canvasW);
+                                                     notifier.updateTextLayer(textLayer.copyWith(boxWidth: newWidth), recordHistory: false);
+                                                   },
+                                                   child: Container(
+                                                     width: 12, height: 24,
+                                                     decoration: BoxDecoration(
+                                                       color: Colors.white,
+                                                       borderRadius: BorderRadius.circular(6),
+                                                       border: Border.all(color: Colors.black26, width: 1),
+                                                     ),
+                                                   ),
+                                                 ),
+                                               ),
+                                             );
+                                           }),
 
                                           // --- Bottom Rotate Handle ---
                                           Positioned(
@@ -707,15 +822,19 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                               ),
                                             ),
                                           ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }),
+                                          ], // closes if (isSelected)
+                                        ], // closes Stack children
+                                      ), // closes Stack
+                                    ), // closes Opacity
+                                  ), // closes Transform.scale
+                                ), // closes Transform.rotate
+                              ); // closes return Transform.translate
+                            },
+                          ), // closes Builder
+                        ), // closes GestureDetector
+                      ), // closes FractionalTranslation
+                    ); // closes Positioned
+                }),
                       ],
                     ),
                   ),

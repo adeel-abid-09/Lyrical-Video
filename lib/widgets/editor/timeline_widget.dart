@@ -23,6 +23,11 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
   double _timeScale = 44.0;
   double _baseScale = 44.0;
 
+  String? _draggingTextId;
+  double _dragTextInitialStart = 0.0;
+  double _dragTextInitialEnd = 0.0;
+  int _dragTextInitialTrack = 0;
+
   @override
   void dispose() {
     _horizontalScrollController.dispose();
@@ -41,9 +46,11 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
     final playhead = project.currentPlayheadTime;
 
     ref.listen<double>(editorProjectProvider.select((p) => p.currentPlayheadTime), (prev, next) {
-      if (project.isPlaying && !_isUserScrolling && _horizontalScrollController.hasClients) {
+      if (!_isUserScrolling && _horizontalScrollController.hasClients) {
         final targetOffset = next * _timeScale;
-        _horizontalScrollController.jumpTo(targetOffset);
+        if ((_horizontalScrollController.offset - targetOffset).abs() > 0.5) {
+          _horizontalScrollController.jumpTo(targetOffset.clamp(0.0, _horizontalScrollController.position.maxScrollExtent));
+        }
       }
     });
 
@@ -67,25 +74,17 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
               child: Row(
                 children: [
                   // 1. Left: Time Display
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    constraints: const BoxConstraints(minWidth: 84),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '${_formatTime(playhead)} / ${_formatTime(duration)}',
-                        style: const TextStyle(
-                          color: Colors.white70, // Slightly dimmed to match screenshot
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          fontFamily: 'monospace',
-                        ),
+                  Expanded(
+                    child: Text(
+                      '${_formatTime(playhead)} / ${_formatTime(duration)}',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
                       ),
                     ),
                   ),
-
-                  const Spacer(),
 
                   // 2. Center: Play/Pause controls
                   Row(
@@ -94,7 +93,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                       IconButton(
                         iconSize: 20,
                         padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32),
+                        constraints: const BoxConstraints(minWidth: 28),
                         icon: const Icon(Icons.replay_5_rounded, color: Colors.white70),
                         onPressed: () => notifier.seekPlayhead(playhead - 5.0),
                       ),
@@ -102,7 +101,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                       IconButton(
                         iconSize: 28,
                         padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 36),
+                        constraints: const BoxConstraints(minWidth: 32),
                         icon: Icon(
                           project.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_arrow_rounded,
                           color: Colors.white,
@@ -113,17 +112,17 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                       IconButton(
                         iconSize: 20,
                         padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32),
+                        constraints: const BoxConstraints(minWidth: 28),
                         icon: const Icon(Icons.forward_5_rounded, color: Colors.white70),
                         onPressed: () => notifier.seekPlayhead(playhead + 5.0),
                       ),
                     ],
                   ),
 
-                  const Spacer(),
-
-                  // 3. Right: Spacer to keep play button centered
-                  const SizedBox(width: 84),
+                  // 3. Right: Balanced spacer
+                  const Expanded(
+                    child: SizedBox.shrink(),
+                  ),
                 ],
               ),
             ),
@@ -153,17 +152,22 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                             if (scrollNotification.metrics.axis == Axis.horizontal) {
                               if (scrollNotification is ScrollStartNotification && scrollNotification.dragDetails != null) {
                                 _isUserScrolling = true;
+                                notifier.setScrubbing(true);
+                              } else if (scrollNotification is ScrollUpdateNotification && scrollNotification.dragDetails != null) {
+                                _isUserScrolling = true;
+                                final playheadTime = (_horizontalScrollController.offset / _timeScale).clamp(0.0, duration);
+                                notifier.seekPlayhead(playheadTime);
                               } else if (scrollNotification is ScrollEndNotification) {
-                                _isUserScrolling = false;
-                              }
-
-                              if (scrollNotification is ScrollUpdateNotification) {
-                                if (!project.isPlaying || scrollNotification.dragDetails != null) {
+                                if (_horizontalScrollController.hasClients) {
                                   final playheadTime = (_horizontalScrollController.offset / _timeScale).clamp(0.0, duration);
-                                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                                    notifier.seekPlayhead(playheadTime);
-                                  });
+                                  notifier.seekPlayhead(playheadTime);
                                 }
+                                notifier.setScrubbing(false);
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  if (mounted) {
+                                    _isUserScrolling = false;
+                                  }
+                                });
                               }
                             }
                             return false;
@@ -462,37 +466,54 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                     size: 14,
                                                   ),
                                                   const SizedBox(width: 4),
-                                                  Text(
-                                                    audio.isMuted ? 'Muted' : 'Mute clip\naudio', 
-                                                    style: const TextStyle(color: Colors.white54, fontSize: 8, height: 1.1),
-                                                    textAlign: TextAlign.center,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  }).toList(),
-                                  if (project.textLayers.isNotEmpty)
-                                    // With the new layout logic we will have multiple text tracks, 
-                                    // but we just render a simple placeholder for the texts section or nothing.
-                                    // Actually, we don't need a row header for every text track.
-                                    Container(
-                                      height: 22,
-                                      margin: const EdgeInsets.symmetric(vertical: 2),
-                                      child: const Icon(Icons.text_fields_rounded, color: Colors.white54, size: 14),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
+                                                   Text(
+                                                     audio.isMuted ? 'Muted' : 'Mute clip\naudio', 
+                                                     style: const TextStyle(color: Colors.white54, fontSize: 8, height: 1.1),
+                                                     textAlign: TextAlign.center,
+                                                   ),
+                                                 ],
+                                               ),
+                                             ),
+                                           ),
+                                         ],
+                                       ),
+                                     );
+                                   }).toList(),
+                                   if (project.textLayers.isNotEmpty)
+                                     ...(() {
+                                       int activeMaxZ = 0;
+                                       for (final text in project.textLayers) {
+                                         if (text.zIndex > activeMaxZ) activeMaxZ = text.zIndex;
+                                       }
+                                       final totalTracks = (_draggingTextId != null ? (activeMaxZ + 2) : (activeMaxZ + 1)).clamp(1, 8);
 
-                        // PLAYHEAD LINE (Fixed, no drag needed because user can drag the ruler instead)
+                                       return List.generate(
+                                         totalTracks,
+                                         (i) => Container(
+                                           height: 22,
+                                           margin: const EdgeInsets.symmetric(vertical: 2),
+                                           child: Row(
+                                             mainAxisAlignment: MainAxisAlignment.center,
+                                             children: [
+                                               const Icon(Icons.text_fields_rounded, color: Colors.white54, size: 12),
+                                               if (totalTracks > 1) ...[
+                                                 const SizedBox(width: 2),
+                                                 Text('T${i + 1}', style: const TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.bold)),
+                                               ],
+                                             ],
+                                           ),
+                                         ),
+                                       );
+                                     })(),
+                                 ],
+                               ),
+                             ),
+                           ),
+                         ),
+
+                        // PLAYHEAD LINE
                         Positioned(
-                          left: playheadOffset - 1, // center the 2px width
+                          left: playheadOffset - 1,
                           top: 0,
                           bottom: 0,
                           child: Container(
@@ -539,42 +560,34 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
   }
 
   List<Widget> _buildTextTracks(EditorProjectModel project, EditorProjectNotifier notifier) {
-    // Sort texts by start time to ensure consistent row assignment
-    final sortedTexts = List<TextLayerModel>.from(project.textLayers)..sort((a, b) => a.startTime.compareTo(b.startTime));
-                                                  
-    // Group text layers into non-overlapping rows
-    final List<List<TextLayerModel>> textRows = [];
-    for (final textLayer in sortedTexts) {
-      bool placed = false;
-      for (int i = 0; i < textRows.length; i++) {
-        bool overlaps = false;
-        for (final placedLayer in textRows[i]) {
-          if (textLayer.startTime < placedLayer.endTime && textLayer.endTime > placedLayer.startTime) {
-            overlaps = true;
-            break;
-          }
-        }
-        if (!overlaps) {
-          textRows[i].add(textLayer);
-          placed = true;
-          break;
-        }
-      }
-      if (!placed) {
-        textRows.add([textLayer]);
-      }
+    int activeMaxZ = 0;
+    for (final textLayer in project.textLayers) {
+      if (textLayer.zIndex > activeMaxZ) activeMaxZ = textLayer.zIndex;
+    }
+    final totalTracks = (_draggingTextId != null ? (activeMaxZ + 2) : (activeMaxZ + 1)).clamp(1, 8);
+
+    final List<List<TextLayerModel>> textRows = List.generate(totalTracks, (_) => []);
+    for (final textLayer in project.textLayers) {
+      final z = textLayer.zIndex.clamp(0, totalTracks - 1);
+      textRows[z].add(textLayer);
+    }
+    for (int i = 0; i < textRows.length; i++) {
+      textRows[i].sort((a, b) => a.startTime.compareTo(b.startTime));
     }
 
-    return textRows.map<Widget>((List<TextLayerModel> row) {
+    return List.generate(totalTracks, (trackIndex) {
+      final row = textRows[trackIndex];
+
       return Container(
         margin: const EdgeInsets.symmetric(vertical: 2),
         height: 22,
         child: Stack(
           children: row.map<Widget>((TextLayerModel text) {
             final isSelected = project.selectedLayerId == text.id;
+            final isDragging = _draggingTextId == text.id;
             final width = ((text.endTime - text.startTime) * _timeScale).clamp(24.0, double.infinity);
-                                                          
-            // Calculate drag constraints based on adjacent items in the same row
+
+            // Adjacent items on this exact track (stationary references)
             final index = row.indexOf(text);
             final minStart = index > 0 ? row[index - 1].endTime : 0.0;
             final maxEnd = index < row.length - 1 ? row[index + 1].startTime : project.duration;
@@ -587,12 +600,21 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
               child: GestureDetector(
                 onTap: () => notifier.selectLayer(text.id),
                 child: Opacity(
-                  opacity: (!isSelected && project.isTrimMode) ? 0.3 : 1.0,
+                  opacity: isDragging ? 0.85 : ((!isSelected && project.isTrimMode) ? 0.3 : 1.0),
                   child: Container(
                     decoration: BoxDecoration(
                       color: isSelected ? const Color(0xFFFF512F) : const Color(0xFFEAB308),
                       borderRadius: BorderRadius.circular(6),
                       border: isSelected ? Border.all(color: Colors.white, width: 1.8) : null,
+                      boxShadow: isDragging
+                          ? [
+                              BoxShadow(
+                                color: const Color(0xFFFF512F).withOpacity(0.6),
+                                blurRadius: 8,
+                                spreadRadius: 1,
+                              )
+                            ]
+                          : null,
                     ),
                     child: Stack(
                       children: [
@@ -600,30 +622,68 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                           behavior: HitTestBehavior.opaque,
                           onLongPressStart: (_) {
                             notifier.pushHistory();
+                            setState(() {
+                              _draggingTextId = text.id;
+                              _dragTextInitialStart = text.startTime;
+                              _dragTextInitialEnd = text.endTime;
+                              _dragTextInitialTrack = text.zIndex;
+                            });
                           },
                           onLongPressMoveUpdate: (details) {
-                            final delta = details.localOffsetFromOrigin.dx / _timeScale;
-                            
-                            double newStart = text.startTime + delta;
-                            double newEnd = text.endTime + delta;
-                            
-                            if (newStart < minStart) {
-                              newStart = minStart;
-                            } else if (newEnd > maxEnd) {
-                              newStart = maxEnd - (text.endTime - text.startTime);
-                            }
-                            
-                            final effectiveDelta = newStart - text.startTime;
-                            if (effectiveDelta != 0) {
-                              notifier.moveTextLayer(text.id, effectiveDelta);
-                            }
+                            final deltaSeconds = details.localOffsetFromOrigin.dx / _timeScale;
+                            final deltaRows = (details.localOffsetFromOrigin.dy / 26.0).round();
+
+                            int targetTrack = (_dragTextInitialTrack + deltaRows).clamp(0, 7);
+
+                            // Find other stationary items on targetTrack
+                            final targetTrackOthers = project.textLayers
+                                .where((l) => l.id != text.id && l.zIndex == targetTrack)
+                                .toList()
+                              ..sort((a, b) => a.startTime.compareTo(b.startTime));
+
+                            final prev = targetTrackOthers.where((l) => l.endTime <= _dragTextInitialStart + 0.05).lastOrNull;
+                            final next = targetTrackOthers.where((l) => l.startTime >= _dragTextInitialEnd - 0.05).firstOrNull;
+
+                            final double trackMin = prev?.endTime ?? 0.0;
+                            final double trackMax = next?.startTime ?? project.duration;
+
+                            final duration = _dragTextInitialEnd - _dragTextInitialStart;
+                            final maxAllowedStart = (trackMax - duration).clamp(trackMin, double.infinity);
+                            final desiredStart = _dragTextInitialStart + deltaSeconds;
+
+                            final clampedStart = desiredStart.clamp(trackMin, maxAllowedStart);
+                            final clampedEnd = clampedStart + duration;
+
+                            // ONLY update the moving text layer! None of the other layers are touched.
+                            notifier.updateTextLayer(
+                              text.copyWith(
+                                startTime: clampedStart,
+                                endTime: clampedEnd,
+                                zIndex: targetTrack,
+                              ),
+                              recordHistory: false,
+                            );
+                          },
+                          onLongPressEnd: (_) {
+                            setState(() {
+                              _draggingTextId = null;
+                            });
+                          },
+                          onLongPressCancel: () {
+                            setState(() {
+                              _draggingTextId = null;
+                            });
                           },
                           child: Container(
                             alignment: Alignment.center,
                             color: Colors.transparent,
                             child: Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 10),
-                              child: Text(text.text, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 10)),
+                              child: Text(
+                                text.text,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
                             ),
                           ),
                         ),
@@ -678,7 +738,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
           }).toList(),
         ),
       );
-    }).toList();
+    });
   }
 
   String _formatTime(double seconds) {

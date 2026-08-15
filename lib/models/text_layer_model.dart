@@ -4,10 +4,15 @@ enum TextAnimationType {
   none,
   fadeIn,
   popIn,
+  blurIn,
   slideUp,
+  slideDown,
   typewriter,
   bounce,
   glow,
+  stamp,
+  zoomIn,
+  wave,
 }
 
 class TextLayerModel {
@@ -28,11 +33,13 @@ class TextLayerModel {
   final TextAlign textAlign;
   final double letterSpacing;
   final double lineSpacing;
+  final double opacity;
   
   // Box/Bubble Properties
   final double? boxWidth;
   final double? boxHeight;
   final double boxBorderRadius;
+  final String? bubbleStyle;
 
   final double startTime; // In seconds
   final double endTime;   // In seconds
@@ -50,25 +57,27 @@ class TextLayerModel {
     this.scaleY = 1.0,
     this.rotation = 0.0,
     this.textColor = Colors.white,
-    this.strokeColor = Colors.black,
-    this.strokeWidth = 2.0,
+    this.strokeColor,
+    this.strokeWidth = 0.0,
     this.backgroundColor,
     this.fontFamily = 'Outfit',
-    this.fontSize = 24.0,
+    this.fontSize = 20.0,
     this.fontWeight = FontWeight.bold,
     this.fontStyle = FontStyle.normal,
     this.textAlign = TextAlign.center,
     this.letterSpacing = 1.0,
     this.lineSpacing = 1.2,
+    this.opacity = 1.0,
     this.boxWidth,
     this.boxHeight,
     this.boxBorderRadius = 8.0,
+    this.bubbleStyle,
     this.startTime = 0.0,
     this.endTime = 10.0,
     this.zIndex = 0,
     this.isVisible = true,
     this.isLocked = false,
-    this.animation = TextAnimationType.fadeIn,
+    this.animation = TextAnimationType.none,
     this.isAutoLyric = false,
   });
 
@@ -90,9 +99,11 @@ class TextLayerModel {
     TextAlign? textAlign,
     double? letterSpacing,
     double? lineSpacing,
+    double? opacity,
     double? boxWidth,
     double? boxHeight,
     double? boxBorderRadius,
+    String? bubbleStyle,
     double? startTime,
     double? endTime,
     int? zIndex,
@@ -100,6 +111,10 @@ class TextLayerModel {
     bool? isLocked,
     TextAnimationType? animation,
     bool? isAutoLyric,
+    bool clearBackground = false,
+    bool clearStroke = false,
+    bool clearBubble = false,
+    bool clearBoxSize = false,
   }) {
     return TextLayerModel(
       id: id ?? this.id,
@@ -109,9 +124,9 @@ class TextLayerModel {
       scaleY: scaleY ?? this.scaleY,
       rotation: rotation ?? this.rotation,
       textColor: textColor ?? this.textColor,
-      strokeColor: strokeColor ?? this.strokeColor,
+      strokeColor: clearStroke ? null : (strokeColor ?? this.strokeColor),
       strokeWidth: strokeWidth ?? this.strokeWidth,
-      backgroundColor: backgroundColor ?? this.backgroundColor,
+      backgroundColor: clearBackground ? null : (backgroundColor ?? this.backgroundColor),
       fontFamily: fontFamily ?? this.fontFamily,
       fontSize: fontSize ?? this.fontSize,
       fontWeight: fontWeight ?? this.fontWeight,
@@ -119,9 +134,11 @@ class TextLayerModel {
       textAlign: textAlign ?? this.textAlign,
       letterSpacing: letterSpacing ?? this.letterSpacing,
       lineSpacing: lineSpacing ?? this.lineSpacing,
-      boxWidth: boxWidth ?? this.boxWidth,
-      boxHeight: boxHeight ?? this.boxHeight,
+      opacity: opacity ?? this.opacity,
+      boxWidth: clearBoxSize ? null : (boxWidth ?? this.boxWidth),
+      boxHeight: clearBoxSize ? null : (boxHeight ?? this.boxHeight),
       boxBorderRadius: boxBorderRadius ?? this.boxBorderRadius,
+      bubbleStyle: clearBubble ? 'none' : (bubbleStyle ?? this.bubbleStyle),
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       zIndex: zIndex ?? this.zIndex,
@@ -155,6 +172,7 @@ class TextLayerModel {
       'boxWidth': boxWidth,
       'boxHeight': boxHeight,
       'boxBorderRadius': boxBorderRadius,
+      'bubbleStyle': bubbleStyle,
       'startTime': startTime,
       'endTime': endTime,
       'zIndex': zIndex,
@@ -188,6 +206,7 @@ class TextLayerModel {
       boxWidth: (json['boxWidth'] as num?)?.toDouble(),
       boxHeight: (json['boxHeight'] as num?)?.toDouble(),
       boxBorderRadius: (json['boxBorderRadius'] as num?)?.toDouble() ?? 8.0,
+      bubbleStyle: json['bubbleStyle'] as String?,
       startTime: (json['startTime'] as num?)?.toDouble() ?? 0.0,
       endTime: (json['endTime'] as num? ?? 10.0).toDouble(),
       zIndex: json['zIndex'] as int? ?? 0,

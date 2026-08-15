@@ -13,6 +13,10 @@ import '../../services/groq_auto_lyrics_service.dart';
 import '../../state/editor_state_notifier.dart';
 import '../../theme/app_theme.dart';
 import 'online_lyrics_dialog.dart';
+import 'text_bubble_painter.dart';
+import 'text_animation_preview_tile.dart';
+import 'text_template_preview_tile.dart';
+import 'text_effect_preview_tile.dart';
 
 enum ToolbarCategory {
   main,
@@ -70,6 +74,16 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     'Dancing Script',
     'Lobster',
     'Anton',
+    'Oswald',
+    'Poppins',
+    'Nunito',
+    'Merriweather',
+    'Cinzel',
+    'Permanent Marker',
+    'Bangers',
+    'Creepster',
+    'Righteous',
+    'Amatic SC',
   ];
 
   static const List<Color> _presetColors = [
@@ -428,11 +442,11 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
       case ToolbarCategory.text:
         final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
         return [
+          _buildItem(Icons.add_rounded, 'Add text', () {
+            ref.read(editorProjectProvider.notifier).addTextLayer('Enter Text');
+            widget.onOpenTextEditor(initialIndex: 0);
+          }),
           if (selectedText == null) ...[
-            _buildItem(Icons.add_rounded, 'Add text', () {
-              ref.read(editorProjectProvider.notifier).addTextLayer('Enter Text');
-              widget.onOpenTextEditor(initialIndex: 0);
-            }),
             _buildItem(Icons.playlist_add_check_rounded, 'Manual Lyrics', widget.onOpenManualLyrics),
             _buildItem(
               _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
@@ -466,9 +480,6 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               if (project.selectedLayerId != null) {
                 ref.read(editorProjectProvider.notifier).splitTextLayer(project.selectedLayerId!, project.currentPlayheadTime);
               }
-            }),
-            _buildItem(Icons.settings_overscan_rounded, 'Trim', () {
-              ref.read(editorProjectProvider.notifier).setTrimMode(true);
             }),
             _buildItem(Icons.delete_outline_rounded, 'Delete', () {
               final project = ref.read(editorProjectProvider);
@@ -525,6 +536,21 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               );
             }
           }),
+          _buildItem(Icons.opacity_rounded, 'Opacity', () {
+            final project = ref.read(editorProjectProvider);
+            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+            if (selectedText != null) {
+              _showSliderBottomSheet(
+                title: 'Opacity',
+                initialValue: selectedText.opacity,
+                min: 0.0,
+                max: 1.0,
+                onChanged: (val) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(opacity: val));
+                },
+              );
+            }
+          }),
         ];
 
       case ToolbarCategory.textPresets:
@@ -542,6 +568,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         ];
 
         return presets.map((p) {
+          final label = p['label'] as String;
           final fg = p['fg'] as Color;
           final stroke = p['stroke'] as Color;
           final bg = p['bg'] as Color;
@@ -559,24 +586,24 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               }
             },
             child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: bg == Colors.transparent ? const Color(0xFF242434) : bg,
-                borderRadius: BorderRadius.circular(8),
+                color: bg == Colors.transparent ? const Color(0xFF1A1A24) : bg,
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.white24),
               ),
-              child: Text(
-                'Aa',
-                style: TextStyle(
-                  color: fg,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  shadows: stroke != Colors.transparent
-                      ? [
-                          Shadow(color: stroke, blurRadius: 2),
-                        ]
-                      : null,
+              child: Center(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: fg,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    shadows: stroke != Colors.transparent
+                        ? [Shadow(color: stroke, blurRadius: 4)]
+                        : null,
+                  ),
                 ),
               ),
             ),
@@ -753,25 +780,36 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
 
         return _fontOptions.map((font) {
           final isSelected = selectedText?.fontFamily == font;
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: FilterChip(
-              selected: isSelected,
-              label: () {
-                final baseStyle = TextStyle(color: isSelected ? Colors.black : Colors.white, fontSize: 12);
-                try {
-                  return Text(font, style: GoogleFonts.getFont(font, textStyle: baseStyle));
-                } catch (_) {
-                  return Text(font, style: baseStyle);
-                }
-              }(),
-              selectedColor: const Color(0xFF00E5FF),
-              backgroundColor: const Color(0xFF28283C),
-              onSelected: (_) {
-                if (selectedText != null) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(fontFamily: font));
-                }
-              },
+          return GestureDetector(
+            onTap: () {
+              if (selectedText != null) {
+                ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(fontFamily: font));
+              }
+            },
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSelected ? const Color(0xFF202030) : const Color(0xFF1A1A24),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isSelected ? const Color(0xFF00E5FF) : Colors.white12,
+                  width: isSelected ? 1.5 : 1.0,
+                ),
+                boxShadow: isSelected
+                    ? [const BoxShadow(color: Color(0x3300E5FF), blurRadius: 8, spreadRadius: 1)]
+                    : [],
+              ),
+              child: Center(
+                child: () {
+                  final baseStyle = TextStyle(color: isSelected ? const Color(0xFF00E5FF) : Colors.white, fontSize: 14);
+                  try {
+                    return Text(font, style: GoogleFonts.getFont(font, textStyle: baseStyle));
+                  } catch (_) {
+                    return Text(font, style: baseStyle);
+                  }
+                }(),
+              ),
             ),
           );
         }).toList();
@@ -780,48 +818,42 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         final project = ref.watch(editorProjectProvider);
         final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
 
-        final templates = [
-          {'name': 'Glow Neon', 'color': Colors.cyanAccent, 'stroke': Colors.pinkAccent, 'font': 'Bebas Neue', 'bg': Colors.transparent},
-          {'name': 'Vlog Yellow', 'color': Colors.black, 'stroke': Colors.transparent, 'font': 'Outfit', 'bg': Colors.yellowAccent},
-          {'name': 'Typewriter', 'color': Colors.white, 'stroke': Colors.black, 'font': 'Roboto', 'bg': Colors.transparent},
-          {'name': 'Classic Gold', 'color': const Color(0xFFFFD700), 'stroke': Colors.deepOrange, 'font': 'Playfair Display', 'bg': Colors.transparent},
-          {'name': 'Retro Red', 'color': Colors.redAccent, 'stroke': Colors.black, 'font': 'Anton', 'bg': Colors.black87},
-          {'name': 'Minimalist', 'color': Colors.white, 'stroke': Colors.black, 'font': 'Inter', 'bg': Colors.transparent},
-          {'name': 'Pastel Pill', 'color': Colors.deepPurple, 'stroke': Colors.transparent, 'font': 'Pacifico', 'bg': Colors.pinkAccent},
-        ];
+        return TextTemplateRegistry.templates.map((def) {
+          final isSelected = def.id == 'none'
+              ? (selectedText?.animation == TextAnimationType.none && (selectedText?.strokeColor == null || selectedText?.strokeColor == Colors.transparent))
+              : (selectedText?.fontFamily == def.fontFamily && selectedText?.animation == def.animation);
 
-        return templates.map((tpl) {
-          final name = tpl['name'] as String;
-          final color = tpl['color'] as Color;
-          final stroke = tpl['stroke'] as Color;
-          final font = tpl['font'] as String;
-          final bg = tpl['bg'] as Color;
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: ActionChip(
-              backgroundColor: const Color(0xFF242434),
-              label: () {
-                final baseStyle = const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12);
-                try {
-                  return Text(name, style: GoogleFonts.getFont(font, textStyle: baseStyle));
-                } catch (_) {
-                  return Text(name, style: baseStyle);
-                }
-              }(),
-              onPressed: () {
-                if (selectedText != null) {
+          return TextTemplatePreviewTile(
+            def: def,
+            isSelected: isSelected,
+            onTap: () {
+              if (selectedText != null) {
+                if (def.id == 'none') {
                   ref.read(editorProjectProvider.notifier).updateTextLayer(
                     selectedText.copyWith(
-                      textColor: color,
-                      strokeColor: stroke == Colors.transparent ? null : stroke,
-                      fontFamily: font,
-                      backgroundColor: bg == Colors.transparent ? null : bg,
+                      textColor: Colors.white,
+                      fontFamily: 'Outfit',
+                      clearStroke: true,
+                      clearBackground: true,
+                      animation: TextAnimationType.none,
+                    ),
+                  );
+                } else {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    selectedText.copyWith(
+                      textColor: def.textColor,
+                      strokeColor: def.strokeColor,
+                      strokeWidth: def.strokeWidth,
+                      clearStroke: def.strokeColor == null,
+                      backgroundColor: def.backgroundColor,
+                      clearBackground: def.backgroundColor == null,
+                      fontFamily: def.fontFamily,
+                      animation: def.animation,
                     ),
                   );
                 }
-              },
-            ),
+              }
+            },
           );
         }).toList();
 
@@ -829,41 +861,38 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         final project = ref.watch(editorProjectProvider);
         final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
 
-        final effects = [
-          {'name': 'Neon Cyan', 'color': Colors.cyanAccent, 'stroke': Colors.blueAccent},
-          {'name': 'Golden Sun', 'color': const Color(0xFFFFD700), 'stroke': Colors.deepOrangeAccent},
-          {'name': 'Cyber Pink', 'color': Colors.pinkAccent, 'stroke': Colors.cyanAccent},
-          {'name': 'Fire Red', 'color': Colors.redAccent, 'stroke': Colors.yellowAccent},
-          {'name': 'Emerald', 'color': Colors.greenAccent, 'stroke': Colors.black},
-          {'name': 'Purple Haze', 'color': Colors.purpleAccent, 'stroke': Colors.white},
-          {'name': 'Heavy Black', 'color': Colors.white, 'stroke': Colors.black},
-        ];
+        return TextEffectRegistry.effects.map((def) {
+          final isSelected = def.id == 'none'
+              ? (selectedText?.strokeColor == null || selectedText?.strokeColor == Colors.transparent)
+              : (selectedText?.strokeColor == def.strokeColor && selectedText?.textColor == def.textColor);
 
-        return effects.map((eff) {
-          final name = eff['name'] as String;
-          final color = eff['color'] as Color;
-          final stroke = eff['stroke'] as Color;
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: ActionChip(
-              backgroundColor: const Color(0xFF242434),
-              label: Text(
-                name,
-                style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12),
-              ),
-              onPressed: () {
-                if (selectedText != null) {
+          return TextEffectPreviewTile(
+            def: def,
+            isSelected: isSelected,
+            onTap: () {
+              if (selectedText != null) {
+                if (def.id == 'none') {
                   ref.read(editorProjectProvider.notifier).updateTextLayer(
                     selectedText.copyWith(
-                      textColor: color,
-                      strokeColor: stroke,
-                      strokeWidth: 3.0,
+                      textColor: Colors.white,
+                      clearStroke: true,
+                      clearBackground: true,
+                    ),
+                  );
+                } else {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    selectedText.copyWith(
+                      textColor: def.textColor,
+                      strokeColor: def.strokeColor,
+                      strokeWidth: def.strokeWidth,
+                      clearStroke: def.strokeColor == null,
+                      backgroundColor: def.backgroundColor,
+                      clearBackground: def.backgroundColor == null,
                     ),
                   );
                 }
-              },
-            ),
+              }
+            },
           );
         }).toList();
 
@@ -871,36 +900,19 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         final project = ref.watch(editorProjectProvider);
         final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
 
-        final anims = [
-          {'label': 'None', 'type': TextAnimationType.none},
-          {'label': 'Fade In', 'type': TextAnimationType.fadeIn},
-          {'label': 'Pop In', 'type': TextAnimationType.popIn},
-          {'label': 'Slide Up', 'type': TextAnimationType.slideUp},
-          {'label': 'Typewriter', 'type': TextAnimationType.typewriter},
-          {'label': 'Bounce', 'type': TextAnimationType.bounce},
-          {'label': 'Glow Pulse', 'type': TextAnimationType.glow},
-        ];
+        return TextAnimationRegistry.animations.map((def) {
+          final isSelected = (selectedText?.animation == def.type);
 
-        return anims.map((anim) {
-          final label = anim['label'] as String;
-          final type = anim['type'] as TextAnimationType;
-          final isSelected = selectedText?.animation == type;
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: FilterChip(
-              selected: isSelected,
-              selectedColor: const Color(0xFF00E5FF),
-              backgroundColor: const Color(0xFF242434),
-              label: Text(label, style: TextStyle(color: isSelected ? Colors.black : Colors.white, fontSize: 12)),
-              onSelected: (_) {
-                if (selectedText != null) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
-                    selectedText.copyWith(animation: type),
-                  );
-                }
-              },
-            ),
+          return TextAnimationPreviewTile(
+            def: def,
+            isSelected: isSelected,
+            onTap: () {
+              if (selectedText != null) {
+                ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  selectedText.copyWith(animation: def.type),
+                );
+              }
+            },
           );
         }).toList();
 
@@ -908,87 +920,86 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         final project = ref.watch(editorProjectProvider);
         final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
 
-        final bubbles = [
-          {'name': 'None', 'bg': Colors.transparent, 'fg': Colors.white},
-          {'name': 'Dark Pill', 'bg': Colors.black87, 'fg': Colors.white},
-          {'name': 'Yellow Badge', 'bg': Colors.yellowAccent, 'fg': Colors.black},
-          {'name': 'White Card', 'bg': Colors.white, 'fg': Colors.black},
-          {'name': 'Cyan Glass', 'bg': Colors.cyanAccent.withOpacity(0.3), 'fg': Colors.white},
-          {'name': 'Red Banner', 'bg': Colors.redAccent, 'fg': Colors.white},
-          {'name': 'Purple Bubble', 'bg': Colors.purpleAccent, 'fg': Colors.white},
-        ];
+        return TextBubbleRegistry.bubbles.map((def) {
+          final isSelected = (selectedText?.bubbleStyle == def.id) || 
+                             (def.id == 'none' && (selectedText?.bubbleStyle == null || selectedText?.bubbleStyle == 'none'));
 
-        return bubbles.map((bub) {
-          final name = bub['name'] as String;
-          final bg = bub['bg'] as Color;
-          final fg = bub['fg'] as Color;
-          final isSelected = selectedText?.backgroundColor == bg;
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: FilterChip(
-              selected: isSelected,
-              selectedColor: const Color(0xFF00E5FF),
-              backgroundColor: const Color(0xFF242434),
-              label: Text(name, style: TextStyle(color: isSelected ? Colors.black : Colors.white, fontSize: 12)),
-              onSelected: (_) {
-                if (selectedText != null) {
+          return TextBubblePreviewTile(
+            def: def,
+            isSelected: isSelected,
+            onTap: () {
+              if (selectedText != null) {
+                if (def.id == 'none') {
                   ref.read(editorProjectProvider.notifier).updateTextLayer(
                     selectedText.copyWith(
-                      backgroundColor: bg == Colors.transparent ? null : bg,
-                      textColor: fg,
+                      clearBubble: true,
+                      clearBackground: true,
+                      clearBoxSize: true,
+                      textColor: Colors.white,
+                    ),
+                  );
+                } else {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    selectedText.copyWith(
+                      bubbleStyle: def.id,
+                      clearBoxSize: true,
+                      clearStroke: true,
+                      textColor: def.defaultTextColor,
+                      backgroundColor: def.defaultBgColor,
                     ),
                   );
                 }
-              },
-            ),
+              }
+            },
           );
         }).toList();
 
       case ToolbarCategory.video:
         return [
-          _buildItem(Icons.delete_outline_rounded, 'Delete', () {
-            final project = ref.read(editorProjectProvider);
-            if (project.selectedLayerId != null) {
-              ref.read(editorProjectProvider.notifier).deleteMediaLayer(project.selectedLayerId!);
-            }
-          }),
+          _buildItem(Icons.add_to_photos_rounded, 'Add Video', () => _pickVideo(replace: false)),
+          _buildItem(Icons.picture_in_picture_rounded, 'Overlay', () => _pickVideo(isOverlay: true)),
           _buildItem(Icons.settings_overscan_rounded, 'Trim', () {
             ref.read(editorProjectProvider.notifier).setTrimMode(true);
           }),
-          _buildItem(Icons.add_to_photos_rounded, 'Add Video', () => _pickVideo(replace: false)),
-          _buildItem(
-            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
-            'Auto Lyrics',
-            _runAutoLyrics,
-          ),
-          _buildItem(Icons.picture_in_picture_rounded, 'Overlay', () => _pickVideo(isOverlay: true)),
-          _buildItem(Icons.library_music_rounded, 'Extract Audio', _extractAudio),
-          _buildItem(Icons.change_circle_outlined, 'Change', () => _pickVideo(replace: true)),
           _buildItem(Icons.content_cut_rounded, 'Split', () {
             final project = ref.read(editorProjectProvider);
             if (project.selectedLayerId != null) {
               ref.read(editorProjectProvider.notifier).splitMediaLayer(project.selectedLayerId!, project.currentPlayheadTime);
             }
           }),
+          _buildItem(Icons.change_circle_outlined, 'Change', () => _pickVideo(replace: true)),
+          _buildItem(Icons.delete_outline_rounded, 'Delete', () {
+            final project = ref.read(editorProjectProvider);
+            if (project.selectedLayerId != null) {
+              ref.read(editorProjectProvider.notifier).deleteMediaLayer(project.selectedLayerId!);
+            }
+          }),
           _buildItem(
-            (() {
-              final project = ref.read(editorProjectProvider);
-              final layer = project.mediaLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-              return layer?.isMuted == true ? Icons.volume_off_rounded : Icons.volume_up_rounded;
-            })(),
-            (() {
-              final project = ref.read(editorProjectProvider);
-              final layer = project.mediaLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-              return layer?.isMuted == true ? 'Unmute' : 'Mute';
-            })(),
+            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+            'Auto Lyrics',
+            _runAutoLyrics,
+          ),
+          _buildItem(Icons.library_music_rounded, 'Extract Audio', _extractAudio),
+          _buildItem(
+            Icons.volume_up_rounded,
+            'Volume',
             () {
               final project = ref.read(editorProjectProvider);
               if (project.selectedLayerId == null) return;
               final layer = project.mediaLayers.firstWhere((l) => l.id == project.selectedLayerId);
-              ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(
-                layer.id,
-                isMuted: !layer.isMuted,
+              
+              _showSliderBottomSheet(
+                title: 'Volume',
+                initialValue: layer.volume,
+                min: 0.0,
+                max: 1.0,
+                onChanged: (val) {
+                  ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(
+                    layer.id, 
+                    volume: val,
+                    isMuted: val == 0.0,
+                  );
+                },
               );
             },
           ),
@@ -996,46 +1007,48 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
 
       case ToolbarCategory.audio:
         return [
-          _buildItem(Icons.delete_outline_rounded, 'Delete', () {
-            final project = ref.read(editorProjectProvider);
-            if (project.selectedLayerId != null) {
-              ref.read(editorProjectProvider.notifier).deleteMediaLayer(project.selectedLayerId!);
-            }
-          }),
+          _buildItem(Icons.audio_file_rounded, 'Add Audio', () => _pickAudio(replace: false)),
           _buildItem(Icons.settings_overscan_rounded, 'Trim', () {
             ref.read(editorProjectProvider.notifier).setTrimMode(true);
           }),
-          _buildItem(Icons.audio_file_rounded, 'Add Audio', () => _pickAudio(replace: false)),
-          _buildItem(
-            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
-            'Auto Lyrics',
-            _runAutoLyrics,
-          ),
-          _buildItem(Icons.change_circle_outlined, 'Replace', () => _pickAudio(replace: true)),
           _buildItem(Icons.content_cut_rounded, 'Split', () {
             final project = ref.read(editorProjectProvider);
             if (project.selectedLayerId != null) {
               ref.read(editorProjectProvider.notifier).splitMediaLayer(project.selectedLayerId!, project.currentPlayheadTime);
             }
           }),
+          _buildItem(Icons.change_circle_outlined, 'Replace', () => _pickAudio(replace: true)),
+          _buildItem(Icons.delete_outline_rounded, 'Delete', () {
+            final project = ref.read(editorProjectProvider);
+            if (project.selectedLayerId != null) {
+              ref.read(editorProjectProvider.notifier).deleteMediaLayer(project.selectedLayerId!);
+            }
+          }),
           _buildItem(
-            (() {
-              final project = ref.read(editorProjectProvider);
-              final layer = project.mediaLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-              return layer?.isMuted == true ? Icons.volume_off_rounded : Icons.volume_up_rounded;
-            })(),
-            (() {
-              final project = ref.read(editorProjectProvider);
-              final layer = project.mediaLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-              return layer?.isMuted == true ? 'Unmute' : 'Mute';
-            })(),
+            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+            'Auto Lyrics',
+            _runAutoLyrics,
+          ),
+          _buildItem(
+            Icons.volume_up_rounded,
+            'Volume',
             () {
               final project = ref.read(editorProjectProvider);
               if (project.selectedLayerId == null) return;
               final layer = project.mediaLayers.firstWhere((l) => l.id == project.selectedLayerId);
-              ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(
-                layer.id,
-                isMuted: !layer.isMuted,
+              
+              _showSliderBottomSheet(
+                title: 'Volume',
+                initialValue: layer.volume,
+                min: 0.0,
+                max: 1.0,
+                onChanged: (val) {
+                  ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(
+                    layer.id, 
+                    volume: val,
+                    isMuted: val == 0.0,
+                  );
+                },
               );
             },
           ),

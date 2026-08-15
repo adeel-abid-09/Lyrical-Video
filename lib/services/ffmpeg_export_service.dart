@@ -12,6 +12,7 @@ import '../models/media_layer_model.dart';
 import '../models/text_layer_model.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'font_manager_service.dart';
+import '../widgets/editor/text_bubble_painter.dart';
 
 class FFmpegExportService {
   static const MethodChannel _channel = MethodChannel('com.lyrical.lyricalvideo/gallery');
@@ -69,8 +70,6 @@ class FFmpegExportService {
     if (audioLayers.isNotEmpty && !audioLayers.first.isMuted) {
       inputArgs.add('-i "${audioLayers.first.path}"');
       audioIdx = inputIndex++;
-    } else if (videoLayers.isNotEmpty && !videoLayers.first.isMuted) {
-      // Audio from video will be used by default if we don't map another audio
     }
 
     Map<int, int> stickerIndices = {};
@@ -129,9 +128,15 @@ class FFmpegExportService {
 
     // Final mapping
     String mapArgs = '-map "$lastVideoLink"';
-    if (audioIdx != null) {
+    bool hasVideoAudio = videoLayers.isNotEmpty && !videoLayers.first.isMuted;
+    bool hasExtraAudio = audioIdx != null;
+
+    if (hasVideoAudio && hasExtraAudio) {
+      filterGraph += '[$videoIdx:a][$audioIdx:a]amix=inputs=2:duration=longest[aout];';
+      mapArgs += ' -map "[aout]"';
+    } else if (hasExtraAudio) {
       mapArgs += ' -map $audioIdx:a';
-    } else if (videoLayers.isNotEmpty && !videoLayers.first.isMuted) {
+    } else if (hasVideoAudio) {
       mapArgs += ' -map $videoIdx:a?'; // Use original video audio if available
     }
 
@@ -198,6 +203,10 @@ class FFmpegExportService {
     // Multiply textLayer.scaleX by our target scale factor!
     canvas.scale(textLayer.scaleX * scaleFactor, textLayer.scaleY * scaleFactor);
 
+    if (textLayer.opacity < 1.0) {
+      canvas.saveLayer(null, Paint()..color = Colors.black.withOpacity(textLayer.opacity.clamp(0.0, 1.0)));
+    }
+
     final baseStyle = TextStyle(
       fontSize: textLayer.fontSize,
       color: textLayer.textColor,
@@ -235,15 +244,26 @@ class FFmpegExportService {
       textDirection: TextDirection.ltr,
     );
     
-    final maxW = (textLayer.boxWidth != null) ? (textLayer.boxWidth! - 36.0) : ((logicalWidth * 0.95) - 36.0).clamp(120.0, logicalWidth);
+    final hasBubble = textLayer.bubbleStyle != null && textLayer.bubbleStyle != 'none';
+    final double padH = hasBubble ? 48.0 : 32.0;
+    final double padV = hasBubble ? 24.0 : 16.0;
+
+    final maxW = (textLayer.boxWidth != null) ? (textLayer.boxWidth! - padH) : ((logicalWidth * 0.90) - padH).clamp(40.0, logicalWidth);
     textPainter.layout(minWidth: 0, maxWidth: maxW);
 
-    final double boxW = textLayer.boxWidth ?? (textPainter.width + 36.0).clamp(120.0, logicalWidth * 0.95);
-    final double boxH = textLayer.boxHeight ?? (textPainter.height + 20.0).clamp(48.0, double.infinity);
+    final double boxW = textLayer.boxWidth ?? (textPainter.width + padH).clamp(40.0, logicalWidth * 0.90);
+    final double boxH = textLayer.boxHeight ?? (textPainter.height + padV).clamp(30.0, double.infinity);
 
     canvas.translate(-boxW / 2, -boxH / 2);
 
-    if (textLayer.backgroundColor != null && textLayer.backgroundColor!.alpha > 0) {
+    if (hasBubble) {
+      BubbleShapePainter.paintBubbleOnCanvas(
+        canvas,
+        Rect.fromLTWH(0, 0, boxW, boxH),
+        textLayer.bubbleStyle!,
+        customColor: textLayer.backgroundColor,
+      );
+    } else if (textLayer.backgroundColor != null && textLayer.backgroundColor!.alpha > 0) {
       final paint = Paint()..color = textLayer.backgroundColor!;
       final rrect = RRect.fromRectAndRadius(
         Rect.fromLTWH(0, 0, boxW, boxH),
@@ -255,6 +275,10 @@ class FFmpegExportService {
     final double textX = (boxW - textPainter.width) / 2;
     final double textY = (boxH - textPainter.height) / 2;
     textPainter.paint(canvas, Offset(textX, textY));
+
+    if (textLayer.opacity < 1.0) {
+      canvas.restore();
+    }
 
     final picture = recorder.endRecording();
     final image = await picture.toImage(targetWidth, targetHeight);
