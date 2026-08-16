@@ -214,10 +214,7 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> {
                 subtitle: Text('${p.duration.toInt()}s • ${p.aspectRatio.label}', style: TextStyle(color: isDark ? Colors.white54 : Colors.black54)),
                 trailing: IconButton(
                   icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-                  onPressed: () async {
-                    await ProjectStorageService.deleteProject(p.id);
-                    _loadProjects();
-                  },
+                  onPressed: () => _confirmDeleteProject(context, p, isDark),
                 ),
                 onTap: () {
                   ref.read(editorProjectProvider.notifier).loadProject(p);
@@ -265,10 +262,7 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> {
                 subtitle: Text('${p.duration.toInt()}s • ${p.aspectRatio.label}', style: TextStyle(color: isDark ? Colors.white54 : Colors.black54)),
                 trailing: IconButton(
                   icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-                  onPressed: () async {
-                    await ProjectStorageService.deleteProject(p.id);
-                    _loadProjects();
-                  },
+                  onPressed: () => _confirmDeleteProject(context, p, isDark),
                 ),
                 onTap: () {
                   ref.read(editorProjectProvider.notifier).loadProject(p);
@@ -281,5 +275,58 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> {
           }),
       ],
     );
+  }
+
+  Future<void> _confirmDeleteProject(BuildContext context, EditorProjectModel project, bool isDark) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E2C) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_forever_rounded, color: Colors.redAccent, size: 24),
+            const SizedBox(width: 8),
+            Text(
+              'Delete Project?',
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to delete "${project.title}"? This action cannot be undone.',
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: isDark ? Colors.white60 : Colors.black54, fontWeight: FontWeight.bold),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await ProjectStorageService.deleteProject(project.id);
+      _loadProjects();
+    }
   }
 }

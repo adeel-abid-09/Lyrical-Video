@@ -45,6 +45,15 @@ class ProjectStorageService {
       final prefs = await SharedPreferences.getInstance();
       final jsonStr = jsonEncode(projects.map((p) => p.toJson()).toList());
       await prefs.setString(_storageKey, jsonStr);
+
+      final restoreId = prefs.getString('editor_restore_session_id');
+      if (restoreId == id) {
+        await prefs.remove('editor_restore_session_id');
+      }
+      final activeId = prefs.getString('active_session_id');
+      if (activeId == id) {
+        await prefs.remove('active_session_id');
+      }
     } catch (e) {
       // Delete error handling
     }

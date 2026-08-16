@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import 'package:keep_screen_on/keep_screen_on.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 
 import '../models/media_layer_model.dart';
 import '../services/ffmpeg_export_service.dart';
@@ -48,6 +49,53 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     KeepScreenOn.turnOff();
     _videoController?.dispose();
     super.dispose();
+  }
+
+  Future<bool> _confirmCancelExport() async {
+    if (!_isExporting) {
+      return true;
+    }
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2C),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 24),
+            SizedBox(width: 8),
+            Text('Cancel Export?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17)),
+          ],
+        ),
+        content: const Text(
+          'Export is currently in progress. Are you sure you want to quit?',
+          style: TextStyle(color: Colors.white70, fontSize: 13.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Continue Export', style: TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Quit', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      try {
+        FFmpegKit.cancel();
+      } catch (_) {}
+      return true;
+    }
+    return false;
   }
 
   Future<void> _startExport() async {
@@ -135,24 +183,38 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     final firstMedia = project.mediaLayers.firstOrNull;
     final percentInt = (_progress * 100).toInt().clamp(0, 100);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF111116),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Top Bar with Close Button [ X ]
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white, size: 26),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                  const Spacer(),
-                ],
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        final shouldPop = await _confirmCancelExport();
+        if (shouldPop && context.mounted) {
+          Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF111116),
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Top Bar with Close Button [ X ]
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white, size: 26),
+                      onPressed: () async {
+                        final shouldPop = await _confirmCancelExport();
+                        if (shouldPop && context.mounted) {
+                          Navigator.pop(context);
+                        }
+                      },
+                    ),
+                    const Spacer(),
+                  ],
+                ),
               ),
-            ),
 
             const SizedBox(height: 8),
 
@@ -181,12 +243,15 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Text(
-                  _errorMessage!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 120),
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: SingleChildScrollView(
+                  child: Text(
+                    _errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
                 ),
               ),
             ] else ...[
@@ -370,8 +435,9 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
   Widget _buildThumbnailWidget(MediaLayerModel media) {
     final path = media.path;
     if (kIsWeb || path.startsWith('blob:') || path.startsWith('http')) {

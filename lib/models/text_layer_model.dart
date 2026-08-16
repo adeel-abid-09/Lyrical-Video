@@ -47,6 +47,7 @@ class TextLayerModel {
   final bool isVisible;
   final bool isLocked;
   final TextAnimationType animation;
+  final double animationDuration; // In seconds (default 0.5s, range 0.2s - 5.0s)
   final bool isAutoLyric;
 
   const TextLayerModel({
@@ -78,6 +79,7 @@ class TextLayerModel {
     this.isVisible = true,
     this.isLocked = false,
     this.animation = TextAnimationType.none,
+    this.animationDuration = 0.5,
     this.isAutoLyric = false,
   });
 
@@ -110,6 +112,7 @@ class TextLayerModel {
     bool? isVisible,
     bool? isLocked,
     TextAnimationType? animation,
+    double? animationDuration,
     bool? isAutoLyric,
     bool clearBackground = false,
     bool clearStroke = false,
@@ -145,6 +148,7 @@ class TextLayerModel {
       isVisible: isVisible ?? this.isVisible,
       isLocked: isLocked ?? this.isLocked,
       animation: animation ?? this.animation,
+      animationDuration: animationDuration ?? this.animationDuration,
       isAutoLyric: isAutoLyric ?? this.isAutoLyric,
     );
   }
@@ -177,6 +181,7 @@ class TextLayerModel {
       'endTime': endTime,
       'zIndex': zIndex,
       'isVisible': isVisible,
+      'animationDuration': animationDuration,
       'isAutoLyric': isAutoLyric,
     };
   }
@@ -211,6 +216,7 @@ class TextLayerModel {
       endTime: (json['endTime'] as num? ?? 10.0).toDouble(),
       zIndex: json['zIndex'] as int? ?? 0,
       isVisible: json['isVisible'] as bool? ?? true,
+      animationDuration: (json['animationDuration'] as num?)?.toDouble() ?? 0.5,
       isAutoLyric: json['isAutoLyric'] as bool? ?? false,
     );
   }

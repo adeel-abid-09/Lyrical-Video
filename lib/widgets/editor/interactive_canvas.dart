@@ -29,7 +29,7 @@ class InteractiveCanvasWidget extends ConsumerStatefulWidget {
   ConsumerState<InteractiveCanvasWidget> createState() => _InteractiveCanvasWidgetState();
 }
 
-class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidget> {
+class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidget> with WidgetsBindingObserver {
   final Map<String, VideoPlayerController> _videoControllers = {};
   final Map<String, AudioPlayer> _audioPlayers = {};
   Timer? _playbackTimer;
@@ -39,15 +39,25 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
   double _baseTextScale = 1.0;
   double _baseTextRotation = 0.0;
   Offset _baseTextPosition = Offset.zero;
+  double _initialHandleDist = 1.0;
+  double _initialHandleAngle = 0.0;
+  double _initialFontSize = 20.0;
+  double? _initialBoxWidth;
+  double? _initialBoxHeight;
+  double _initialRotation = 0.0;
 
   @override
   void initState() {
     super.initState();
-    // Continuous timer for scrubber & playhead sync (120ms lightweight update for 60 FPS video smoothness)
+    WidgetsBinding.instance.addObserver(this);
+    _startPlaybackTimer();
+  }
+
+  void _startPlaybackTimer() {
+    _playbackTimer?.cancel();
     _playbackTimer = Timer.periodic(const Duration(milliseconds: 32), (timer) {
       final project = ref.read(editorProjectProvider);
       if (project.isPlaying && !project.isScrubbing) {
-
         final newTime = project.currentPlayheadTime + 0.032;
         final notifier = ref.read(editorProjectProvider.notifier);
         
@@ -62,7 +72,32 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached || state == AppLifecycleState.hidden) {
+      _playbackTimer?.cancel();
+      for (final ctrl in _videoControllers.values) {
+        try {
+          if (ctrl.value.isPlaying) {
+            ctrl.pause();
+          }
+        } catch (_) {}
+      }
+      for (final p in _audioPlayers.values) {
+        try {
+          if (p.playing) {
+            p.pause();
+          }
+        } catch (_) {}
+      }
+      ref.read(editorProjectProvider.notifier).setPlaying(false);
+    } else if (state == AppLifecycleState.resumed) {
+      _startPlaybackTimer();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _playbackTimer?.cancel();
     for (final controller in _videoControllers.values) {
       controller.dispose();
@@ -429,16 +464,16 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                             );
                           }
 
-                          final isBackground = project.mediaLayers.first.id == layer.id;
+                          final firstVisualLayer = project.mediaLayers.where((m) => m.type == MediaType.video || m.type == MediaType.sticker).firstOrNull;
+                          final isBackground = firstVisualLayer?.id == layer.id;
                           if (isBackground) {
-                            return GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => notifier.selectLayer(layer.id),
-                              child: IgnorePointer(
+                            return Positioned.fill(
+                              key: ValueKey(layer.id),
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => notifier.selectLayer(layer.id),
                                 child: Container(
-                                  decoration: const BoxDecoration(
-                                    // Removed border from interactive canvas
-                                  ),
+                                  color: Colors.black,
                                   child: mediaWidget,
                                 ),
                               ),
@@ -527,122 +562,122 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                             top: centerY,
                             child: FractionalTranslation(
                               translation: const Offset(-0.5, -0.5),
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () {
-                                  notifier.selectLayer(textLayer.id);
-                                },
-                                onDoubleTap: () {
-                                  notifier.selectLayer(textLayer.id);
-                                  widget.onOpenTextEditor?.call(initialIndex: 0);
-                                },
-                                // Removed long press because onScaleUpdate handles 1-finger panning perfectly
-                                onPanStart: (details) {
-                                  notifier.pushHistory();
-                                  notifier.selectLayer(textLayer.id);
-                                  _baseTextPosition = textLayer.position;
-                                },
-                                onPanUpdate: (details) {
-                                  final currentDx = _baseTextPosition.dx * canvasW;
-                                  final currentDy = _baseTextPosition.dy * canvasH;
+                              child: Builder(
+                                builder: (context) {
+                                  final timeSinceStart = (project.currentPlayheadTime - textLayer.startTime).clamp(0.0, double.infinity);
+                                  final animDur = textLayer.animationDuration.clamp(0.1, 10.0);
+                                  final animProgress = (timeSinceStart / animDur).clamp(0.0, 1.0);
 
-                                  final newDx = ((currentDx + details.delta.dx) / canvasW).clamp(0.05, 0.95);
-                                  final newDy = ((currentDy + details.delta.dy) / canvasH).clamp(0.05, 0.95);
+                                  double liveOpacity = textLayer.opacity.clamp(0.0, 1.0);
+                                  double liveScale = textLayer.scaleX;
+                                  double liveTranslateY = 0.0;
+                                  double liveRotateAngle = textLayer.rotation;
+                                  String liveText = textLayer.text;
+                                  List<Shadow>? liveGlowShadows;
 
-                                  _baseTextPosition = Offset(newDx, newDy);
+                                  switch (textLayer.animation) {
+                                    case TextAnimationType.none:
+                                      break;
+                                    case TextAnimationType.fadeIn:
+                                      liveOpacity *= Curves.easeIn.transform(animProgress);
+                                      break;
+                                    case TextAnimationType.popIn:
+                                      final s = animProgress < 0.8
+                                          ? (animProgress / 0.8) * 1.2
+                                          : 1.2 - ((animProgress - 0.8) / 0.2) * 0.2;
+                                      liveScale *= s.clamp(0.01, 1.3);
+                                      break;
+                                    case TextAnimationType.blurIn:
+                                      final s = 0.7 + (Curves.easeOut.transform(animProgress) * 0.3);
+                                      liveScale *= s;
+                                      liveOpacity *= animProgress.clamp(0.05, 1.0);
+                                      break;
+                                    case TextAnimationType.slideUp:
+                                      liveTranslateY = (1.0 - Curves.easeOutCubic.transform(animProgress)) * 30.0;
+                                      liveOpacity *= animProgress;
+                                      break;
+                                    case TextAnimationType.slideDown:
+                                      liveTranslateY = -(1.0 - Curves.easeOutCubic.transform(animProgress)) * 30.0;
+                                      liveOpacity *= animProgress;
+                                      break;
+                                    case TextAnimationType.typewriter:
+                                      final count = (textLayer.text.length * animProgress).clamp(1, textLayer.text.length).toInt();
+                                      liveText = textLayer.text.substring(0, count);
+                                      break;
+                                    case TextAnimationType.bounce:
+                                      final b = Curves.bounceOut.transform(animProgress);
+                                      liveTranslateY = (1.0 - b) * -25.0;
+                                      break;
+                                    case TextAnimationType.glow:
+                                      final radius = (sin(timeSinceStart * pi * 3).abs() * 8.0) + 2.0;
+                                      liveGlowShadows = [
+                                        Shadow(color: Colors.white, blurRadius: radius),
+                                        Shadow(color: const Color(0xFF00E5FF), blurRadius: radius * 1.5),
+                                      ];
+                                      break;
+                                    case TextAnimationType.stamp:
+                                      final s = animProgress < 0.6
+                                          ? 2.2 - (Curves.easeInQuad.transform(animProgress / 0.6) * 1.2)
+                                          : 1.0;
+                                      liveScale *= s;
+                                      break;
+                                    case TextAnimationType.zoomIn:
+                                      liveScale *= Curves.easeOutBack.transform(animProgress).clamp(0.01, 1.2);
+                                      break;
+                                    case TextAnimationType.wave:
+                                      liveRotateAngle += sin(animProgress * pi * 2) * 0.12;
+                                      break;
+                                  }
 
-                                  notifier.updateTextLayer(
-                                    textLayer.copyWith(
-                                      position: _baseTextPosition,
-                                    ),
-                                    recordHistory: false,
-                                  );
-                                },
-                                child: Builder(
-                                  builder: (context) {
-                                    final timeSinceStart = (project.currentPlayheadTime - textLayer.startTime).clamp(0.0, double.infinity);
-                                    final animProgress = (timeSinceStart / 0.55).clamp(0.0, 1.0);
+                                  return Transform.translate(
+                                    offset: Offset(0, liveTranslateY),
+                                    child: Transform.rotate(
+                                      angle: liveRotateAngle,
+                                      child: Transform.scale(
+                                        scale: liveScale,
+                                        child: Opacity(
+                                          opacity: liveOpacity,
+                                          child: Stack(
+                                            clipBehavior: Clip.none,
+                                            children: [
+                                              // 1. Text Box Body (Interactive Position & Tap)
+                                              GestureDetector(
+                                                behavior: HitTestBehavior.opaque,
+                                                onTap: () {
+                                                  notifier.selectLayer(textLayer.id);
+                                                },
+                                                onDoubleTap: () {
+                                                  notifier.selectLayer(textLayer.id);
+                                                  widget.onOpenTextEditor?.call(initialIndex: 0);
+                                                },
+                                                onPanStart: (details) {
+                                                  notifier.pushHistory();
+                                                  notifier.selectLayer(textLayer.id);
+                                                  _baseTextPosition = textLayer.position;
+                                                },
+                                                onPanUpdate: (details) {
+                                                  final currentDx = _baseTextPosition.dx * canvasW;
+                                                  final currentDy = _baseTextPosition.dy * canvasH;
 
-                                    double liveOpacity = textLayer.opacity.clamp(0.0, 1.0);
-                                    double liveScale = textLayer.scaleX;
-                                    double liveTranslateY = 0.0;
-                                    double liveRotateAngle = textLayer.rotation;
-                                    String liveText = textLayer.text;
-                                    List<Shadow>? liveGlowShadows;
+                                                  final newDx = ((currentDx + details.delta.dx) / canvasW).clamp(0.05, 0.95);
+                                                  final newDy = ((currentDy + details.delta.dy) / canvasH).clamp(0.05, 0.95);
 
-                                    switch (textLayer.animation) {
-                                      case TextAnimationType.none:
-                                        break;
-                                      case TextAnimationType.fadeIn:
-                                        liveOpacity *= Curves.easeIn.transform(animProgress);
-                                        break;
-                                      case TextAnimationType.popIn:
-                                        final s = animProgress < 0.8
-                                            ? (animProgress / 0.8) * 1.2
-                                            : 1.2 - ((animProgress - 0.8) / 0.2) * 0.2;
-                                        liveScale *= s.clamp(0.01, 1.3);
-                                        break;
-                                      case TextAnimationType.blurIn:
-                                        final s = 0.7 + (Curves.easeOut.transform(animProgress) * 0.3);
-                                        liveScale *= s;
-                                        liveOpacity *= animProgress.clamp(0.05, 1.0);
-                                        break;
-                                      case TextAnimationType.slideUp:
-                                        liveTranslateY = (1.0 - Curves.easeOutCubic.transform(animProgress)) * 30.0;
-                                        liveOpacity *= animProgress;
-                                        break;
-                                      case TextAnimationType.slideDown:
-                                        liveTranslateY = -(1.0 - Curves.easeOutCubic.transform(animProgress)) * 30.0;
-                                        liveOpacity *= animProgress;
-                                        break;
-                                      case TextAnimationType.typewriter:
-                                        final count = (textLayer.text.length * animProgress).clamp(1, textLayer.text.length).toInt();
-                                        liveText = textLayer.text.substring(0, count);
-                                        break;
-                                      case TextAnimationType.bounce:
-                                        final b = Curves.bounceOut.transform(animProgress);
-                                        liveTranslateY = (1.0 - b) * -25.0;
-                                        break;
-                                      case TextAnimationType.glow:
-                                        final radius = (sin(timeSinceStart * pi * 3).abs() * 8.0) + 2.0;
-                                        liveGlowShadows = [
-                                          Shadow(color: Colors.white, blurRadius: radius),
-                                          Shadow(color: const Color(0xFF00E5FF), blurRadius: radius * 1.5),
-                                        ];
-                                        break;
-                                      case TextAnimationType.stamp:
-                                        final s = animProgress < 0.6
-                                            ? 2.2 - (Curves.easeInQuad.transform(animProgress / 0.6) * 1.2)
-                                            : 1.0;
-                                        liveScale *= s;
-                                        break;
-                                      case TextAnimationType.zoomIn:
-                                        liveScale *= Curves.easeOutBack.transform(animProgress).clamp(0.01, 1.2);
-                                        break;
-                                      case TextAnimationType.wave:
-                                        liveRotateAngle += sin(animProgress * pi * 2) * 0.12;
-                                        break;
-                                    }
+                                                  _baseTextPosition = Offset(newDx, newDy);
 
-                                    return Transform.translate(
-                                      offset: Offset(0, liveTranslateY),
-                                      child: Transform.rotate(
-                                        angle: liveRotateAngle,
-                                        child: Transform.scale(
-                                          scale: liveScale,
-                                          child: Opacity(
-                                            opacity: liveOpacity,
-                                            child: Stack(
-                                              clipBehavior: Clip.none,
-                                              children: [
-                                                // Text Box Border & Content Container
-                                                Builder(
+                                                  notifier.updateTextLayer(
+                                                    textLayer.copyWith(
+                                                      position: _baseTextPosition,
+                                                    ),
+                                                    recordHistory: false,
+                                                  );
+                                                },
+                                                child: Builder(
                                                   builder: (context) {
                                                     final hasBubble = textLayer.bubbleStyle != null && textLayer.bubbleStyle != 'none';
 
                                                     final textWidget = Padding(
                                                       padding: EdgeInsets.symmetric(
-                                                        horizontal: hasBubble ? 24.0 : 16.0, 
+                                                        horizontal: hasBubble ? 24.0 : 16.0,
                                                         vertical: hasBubble ? 12.0 : 8.0,
                                                       ),
                                                       child: Text(
@@ -656,6 +691,7 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                                             fontWeight: textLayer.fontWeight,
                                                             fontStyle: textLayer.fontStyle,
                                                             letterSpacing: textLayer.letterSpacing,
+                                                            height: textLayer.lineSpacing,
                                                             shadows: liveGlowShadows ?? [
                                                               Shadow(
                                                                 color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9),
@@ -681,160 +717,293 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                                       ),
                                                     );
 
-                                               if (hasBubble) {
-                                                 return CustomPaint(
-                                                   painter: BubbleShapePainter(
-                                                     styleId: textLayer.bubbleStyle!,
-                                                     customColor: textLayer.backgroundColor,
-                                                   ),
-                                                   child: Container(
-                                                     width: textLayer.boxWidth,
-                                                     height: textLayer.boxHeight,
-                                                     constraints: BoxConstraints(
-                                                       minWidth: 40.0,
-                                                       minHeight: 30.0,
-                                                       maxWidth: (canvasW * 0.95).clamp(40.0, canvasW),
-                                                     ),
-                                                     child: textWidget,
-                                                   ),
-                                                 );
-                                               }
+                                                    if (hasBubble) {
+                                                      return CustomPaint(
+                                                        painter: BubbleShapePainter(
+                                                          styleId: textLayer.bubbleStyle!,
+                                                          customColor: textLayer.backgroundColor,
+                                                        ),
+                                                        child: Container(
+                                                          width: textLayer.boxWidth,
+                                                          height: textLayer.boxHeight,
+                                                          constraints: BoxConstraints(
+                                                            minWidth: 40.0,
+                                                            minHeight: 30.0,
+                                                            maxWidth: (canvasW * 0.95).clamp(40.0, canvasW),
+                                                          ),
+                                                          child: textWidget,
+                                                        ),
+                                                      );
+                                                    }
 
-                                               return Container(
-                                                 decoration: BoxDecoration(
-                                                   color: textLayer.backgroundColor,
-                                                   borderRadius: BorderRadius.circular(textLayer.boxBorderRadius),
-                                                   border: isSelected ? Border.all(color: Colors.white.withOpacity(0.8), width: 1.0) : null,
-                                                 ),
-                                                 width: textLayer.boxWidth,
-                                                 height: textLayer.boxHeight,
-                                                 constraints: BoxConstraints(
-                                                   minWidth: 40.0,
-                                                   minHeight: 30.0,
-                                                   maxWidth: (canvasW * 0.95).clamp(40.0, canvasW),
-                                                 ),
-                                                 child: textWidget,
-                                               );
-                                             },
-                                           ),
-
-                                        // Handles when Selected
-                                        if (isSelected) ...[
-                                          // --- 4 Corner Dots for Scaling ---
-                                          ...[
-                                            const Alignment(-1, -1), // Top-Left
-                                            const Alignment(1, -1),  // Top-Right
-                                            const Alignment(-1, 1),  // Bottom-Left
-                                            const Alignment(1, 1),   // Bottom-Right
-                                          ].map((align) {
-                                             return Positioned(
-                                               left: align.x == -1 ? -8 : null,
-                                               right: align.x == 1 ? -8 : null,
-                                               top: align.y == -1 ? -8 : null,
-                                               bottom: align.y == 1 ? -8 : null,
-                                               child: GestureDetector(
-                                                 behavior: HitTestBehavior.opaque,
-                                                 onPanStart: (_) => notifier.pushHistory(),
-                                                 onPanUpdate: (details) {
-                                                   // Simple scaling based on diagonal drag distance
-                                                   double delta = 0;
-                                                   if (align.x == 1 && align.y == 1) { // BR
-                                                     delta = (details.delta.dx + details.delta.dy) * 0.005;
-                                                   } else if (align.x == -1 && align.y == -1) { // TL
-                                                     delta = -(details.delta.dx + details.delta.dy) * 0.005;
-                                                   } else if (align.x == 1 && align.y == -1) { // TR
-                                                     delta = (details.delta.dx - details.delta.dy) * 0.005;
-                                                   } else if (align.x == -1 && align.y == 1) { // BL
-                                                     delta = (-details.delta.dx + details.delta.dy) * 0.005;
-                                                   }
-                                                   
-                                                   final newScale = (textLayer.scaleX + delta).clamp(0.2, 5.0);
-                                                   final newFontSize = (textLayer.fontSize + delta * 20).clamp(12.0, 150.0);
-                                                   notifier.updateTextLayer(textLayer.copyWith(scaleX: newScale, fontSize: newFontSize), recordHistory: false);
-                                                 },
-                                                 child: Container(
-                                                   width: 12, height: 12,
-                                                   decoration: BoxDecoration(
-                                                     color: Colors.white,
-                                                     shape: BoxShape.circle,
-                                                     border: Border.all(color: Colors.black26, width: 1),
-                                                   ),
-                                                 ),
-                                               ),
-                                             );
-                                           }),
-
-                                           // --- Left and Right Pill Handles for Width Adjust ---
-                                           ...[
-                                             const Alignment(-1, 0), // Left
-                                             const Alignment(1, 0),  // Right
-                                           ].map((align) {
-                                             return Positioned(
-                                               left: align.x == -1 ? -8 : null,
-                                               right: align.x == 1 ? -8 : null,
-                                               top: 0, bottom: 0,
-                                               child: Center(
-                                                 child: GestureDetector(
-                                                   behavior: HitTestBehavior.opaque,
-                                                   onPanStart: (_) => notifier.pushHistory(),
-                                                   onPanUpdate: (details) {
-                                                     final delta = align.x == 1 ? details.delta.dx : -details.delta.dx;
-                                                     final newWidth = ((textLayer.boxWidth ?? 120.0) + delta * 2).clamp(60.0, canvasW);
-                                                     notifier.updateTextLayer(textLayer.copyWith(boxWidth: newWidth), recordHistory: false);
-                                                   },
-                                                   child: Container(
-                                                     width: 12, height: 24,
-                                                     decoration: BoxDecoration(
-                                                       color: Colors.white,
-                                                       borderRadius: BorderRadius.circular(6),
-                                                       border: Border.all(color: Colors.black26, width: 1),
-                                                     ),
-                                                   ),
-                                                 ),
-                                               ),
-                                             );
-                                           }),
-
-                                          // --- Bottom Rotate Handle ---
-                                          Positioned(
-                                            bottom: -32,
-                                            left: 0, right: 0,
-                                            child: Center(
-                                              child: GestureDetector(
-                                                behavior: HitTestBehavior.opaque,
-                                                onPanStart: (_) => notifier.pushHistory(),
-                                                onPanUpdate: (details) {
-                                                  // Rotating
-                                                  final rotDelta = details.delta.dx * 0.01;
-                                                  final newRotation = textLayer.rotation + rotDelta;
-                                                  notifier.updateTextLayer(textLayer.copyWith(rotation: newRotation), recordHistory: false);
-                                                },
-                                                child: Container(
-                                                  width: 24, height: 24,
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white,
-                                                    shape: BoxShape.circle,
-                                                    border: Border.all(color: Colors.black26, width: 1),
-                                                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                                                  ),
-                                                  child: const Icon(Icons.sync_rounded, size: 16, color: Colors.black87),
+                                                    return Container(
+                                                      decoration: BoxDecoration(
+                                                        color: textLayer.backgroundColor,
+                                                        borderRadius: BorderRadius.circular(textLayer.boxBorderRadius),
+                                                        border: isSelected ? Border.all(color: Colors.white.withOpacity(0.85), width: 1.0) : null,
+                                                      ),
+                                                      width: textLayer.boxWidth,
+                                                      height: textLayer.boxHeight,
+                                                      alignment: Alignment.center,
+                                                      constraints: BoxConstraints(
+                                                        minWidth: 40.0,
+                                                        minHeight: 30.0,
+                                                        maxWidth: (canvasW * 0.95).clamp(40.0, canvasW),
+                                                      ),
+                                                      child: textLayer.boxHeight != null || textLayer.boxWidth != null
+                                                          ? FittedBox(
+                                                              fit: BoxFit.scaleDown,
+                                                              alignment: Alignment.center,
+                                                              child: textWidget,
+                                                            )
+                                                          : textWidget,
+                                                    );
+                                                  },
                                                 ),
                                               ),
-                                            ),
+
+                                              // 2. Interactive Selection Handles (Original 4-Corner Resize + Edge Pills + Bottom Rotate)
+                                              if (isSelected) ...[
+                                                // --- 4 Corner Dots for Scaling & Resizing ---
+                                                ...[
+                                                  const Alignment(-1, -1), // Top-Left
+                                                  const Alignment(1, -1),  // Top-Right
+                                                  const Alignment(-1, 1),  // Bottom-Left
+                                                  const Alignment(1, 1),   // Bottom-Right
+                                                ].map((align) {
+                                                  return Positioned(
+                                                    left: align.x == -1 ? -12 : null,
+                                                    right: align.x == 1 ? -12 : null,
+                                                    top: align.y == -1 ? -12 : null,
+                                                    bottom: align.y == 1 ? -12 : null,
+                                                    child: GestureDetector(
+                                                      behavior: HitTestBehavior.opaque,
+                                                      onPanStart: (details) {
+                                                        final canvasBox = context.findRenderObject() as RenderBox?;
+                                                        final localTouch = canvasBox != null 
+                                                            ? canvasBox.globalToLocal(details.globalPosition) 
+                                                            : details.localPosition;
+                                                        final textCenter = Offset(textLayer.position.dx * canvasW, textLayer.position.dy * canvasH);
+                                                        _initialHandleDist = (localTouch - textCenter).distance;
+                                                        if (_initialHandleDist < 10.0) _initialHandleDist = 10.0;
+                                                        _initialFontSize = textLayer.fontSize;
+                                                        _initialBoxWidth = textLayer.boxWidth;
+                                                        _initialBoxHeight = textLayer.boxHeight;
+                                                        notifier.pushHistory();
+                                                      },
+                                                      onPanUpdate: (details) {
+                                                        final canvasBox = context.findRenderObject() as RenderBox?;
+                                                        final localTouch = canvasBox != null 
+                                                            ? canvasBox.globalToLocal(details.globalPosition) 
+                                                            : details.localPosition;
+                                                        final textCenter = Offset(textLayer.position.dx * canvasW, textLayer.position.dy * canvasH);
+                                                        final currDist = (localTouch - textCenter).distance;
+                                                        final scaleFactor = currDist / (_initialHandleDist > 0 ? _initialHandleDist : 1.0);
+
+                                                        final newFontSize = (_initialFontSize * scaleFactor).clamp(10.0, 160.0);
+
+                                                        double? newBoxWidth;
+                                                        double? newBoxHeight;
+                                                        if (_initialBoxWidth != null) {
+                                                          newBoxWidth = (_initialBoxWidth! * scaleFactor).clamp(40.0, canvasW);
+                                                        }
+                                                        if (_initialBoxHeight != null) {
+                                                          newBoxHeight = (_initialBoxHeight! * scaleFactor).clamp(30.0, canvasH);
+                                                        }
+
+                                                        notifier.updateTextLayer(
+                                                          textLayer.copyWith(
+                                                            fontSize: newFontSize,
+                                                            boxWidth: newBoxWidth,
+                                                            boxHeight: newBoxHeight,
+                                                          ),
+                                                          recordHistory: false,
+                                                        );
+                                                      },
+                                                      child: Container(
+                                                        width: 24,
+                                                        height: 24,
+                                                        alignment: Alignment.center,
+                                                        child: Container(
+                                                          width: 10,
+                                                          height: 10,
+                                                          decoration: BoxDecoration(
+                                                            color: Colors.white,
+                                                            shape: BoxShape.circle,
+                                                            border: Border.all(color: Colors.black54, width: 1),
+                                                            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 3)],
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
+                                                }),
+
+                                                // --- Left and Right Pill Handles for Width Adjust ---
+                                                ...[
+                                                  const Alignment(-1, 0), // Left
+                                                  const Alignment(1, 0),  // Right
+                                                ].map((align) {
+                                                  return Positioned(
+                                                    left: align.x == -1 ? -12 : null,
+                                                    right: align.x == 1 ? -12 : null,
+                                                    top: 0,
+                                                    bottom: 0,
+                                                    child: Center(
+                                                      child: GestureDetector(
+                                                        behavior: HitTestBehavior.opaque,
+                                                        onPanStart: (_) => notifier.pushHistory(),
+                                                        onPanUpdate: (details) {
+                                                          final currentWidth = textLayer.boxWidth ?? 120.0;
+                                                          final delta = (align.x == 1 ? details.delta.dx : -details.delta.dx) * 2;
+                                                          final newWidth = (currentWidth + delta).clamp(40.0, canvasW);
+                                                          notifier.updateTextLayer(textLayer.copyWith(boxWidth: newWidth), recordHistory: false);
+                                                        },
+                                                        child: Container(
+                                                          width: 24,
+                                                          height: 32,
+                                                          alignment: Alignment.center,
+                                                          child: Container(
+                                                            width: 8,
+                                                            height: 20,
+                                                            decoration: BoxDecoration(
+                                                              color: Colors.white,
+                                                              borderRadius: BorderRadius.circular(4),
+                                                              border: Border.all(color: Colors.black45, width: 1),
+                                                              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
+                                                }),
+
+                                                // --- Top and Bottom Pill Handles for Height Adjust ---
+                                                ...[
+                                                  const Alignment(0, -1), // Top
+                                                  const Alignment(0, 1),  // Bottom
+                                                ].map((align) {
+                                                  return Positioned(
+                                                    top: align.y == -1 ? -12 : null,
+                                                    bottom: align.y == 1 ? -12 : null,
+                                                    left: 0,
+                                                    right: 0,
+                                                    child: Center(
+                                                      child: GestureDetector(
+                                                        behavior: HitTestBehavior.opaque,
+                                                        onPanStart: (_) => notifier.pushHistory(),
+                                                        onPanUpdate: (details) {
+                                                          final currentHeight = textLayer.boxHeight ?? 50.0;
+                                                          final delta = (align.y == 1 ? details.delta.dy : -details.delta.dy) * 2;
+                                                          final newHeight = (currentHeight + delta).clamp(30.0, canvasH);
+                                                          notifier.updateTextLayer(textLayer.copyWith(boxHeight: newHeight), recordHistory: false);
+                                                        },
+                                                        child: Container(
+                                                          width: 32,
+                                                          height: 24,
+                                                          alignment: Alignment.center,
+                                                          child: Container(
+                                                            width: 20,
+                                                            height: 8,
+                                                            decoration: BoxDecoration(
+                                                              color: Colors.white,
+                                                              borderRadius: BorderRadius.circular(4),
+                                                              border: Border.all(color: Colors.black45, width: 1),
+                                                              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
+                                                }),
+
+                                                // --- Live Degree Indicator Badge on Top ---
+                                                Positioned(
+                                                  top: -30,
+                                                  left: 0,
+                                                  right: 0,
+                                                  child: Center(
+                                                    child: Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(0xFF14141E).withOpacity(0.92),
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.8), width: 1),
+                                                        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)],
+                                                      ),
+                                                      child: Text(
+                                                        '${(((textLayer.rotation * 180 / pi) % 360 + 360) % 360).round()}°',
+                                                        style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.bold),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+
+                                                // --- Dedicated Bottom Rotate Handle ---
+                                                Positioned(
+                                                  bottom: -36,
+                                                  left: 0,
+                                                  right: 0,
+                                                  child: Center(
+                                                    child: GestureDetector(
+                                                      behavior: HitTestBehavior.opaque,
+                                                      onPanStart: (details) {
+                                                        final canvasBox = context.findRenderObject() as RenderBox?;
+                                                        final localTouch = canvasBox != null 
+                                                            ? canvasBox.globalToLocal(details.globalPosition) 
+                                                            : details.localPosition;
+                                                        final textCenter = Offset(textLayer.position.dx * canvasW, textLayer.position.dy * canvasH);
+                                                        _initialHandleAngle = atan2(localTouch.dy - textCenter.dy, localTouch.dx - textCenter.dx);
+                                                        _initialRotation = textLayer.rotation;
+                                                        notifier.pushHistory();
+                                                      },
+                                                      onPanUpdate: (details) {
+                                                        final canvasBox = context.findRenderObject() as RenderBox?;
+                                                        final localTouch = canvasBox != null 
+                                                            ? canvasBox.globalToLocal(details.globalPosition) 
+                                                            : details.localPosition;
+                                                        final textCenter = Offset(textLayer.position.dx * canvasW, textLayer.position.dy * canvasH);
+                                                        final currAngle = atan2(localTouch.dy - textCenter.dy, localTouch.dx - textCenter.dx);
+                                                        final deltaAngle = currAngle - _initialHandleAngle;
+                                                        final newRotation = _initialRotation + deltaAngle;
+                                                        notifier.updateTextLayer(
+                                                          textLayer.copyWith(rotation: newRotation),
+                                                          recordHistory: false,
+                                                        );
+                                                      },
+                                                      child: Container(
+                                                        width: 36,
+                                                        height: 36,
+                                                        alignment: Alignment.center,
+                                                        child: Container(
+                                                          width: 22,
+                                                          height: 22,
+                                                          decoration: BoxDecoration(
+                                                            color: Colors.white,
+                                                            shape: BoxShape.circle,
+                                                            border: Border.all(color: Colors.black38, width: 1),
+                                                            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4, spreadRadius: 0.5)],
+                                                          ),
+                                                          child: const Icon(Icons.sync_rounded, size: 15, color: Colors.black87),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
                                           ),
-                                          ], // closes if (isSelected)
-                                        ], // closes Stack children
-                                      ), // closes Stack
-                                    ), // closes Opacity
-                                  ), // closes Transform.scale
-                                ), // closes Transform.rotate
-                              ); // closes return Transform.translate
-                            },
-                          ), // closes Builder
-                        ), // closes GestureDetector
-                      ), // closes FractionalTranslation
-                    ); // closes Positioned
-                }),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          );
+                        }),
                       ],
                     ),
                   ),

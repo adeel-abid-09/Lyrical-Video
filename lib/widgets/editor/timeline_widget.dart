@@ -481,12 +481,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                    }).toList(),
                                    if (project.textLayers.isNotEmpty)
                                      ...(() {
-                                       int activeMaxZ = 0;
-                                       for (final text in project.textLayers) {
-                                         if (text.zIndex > activeMaxZ) activeMaxZ = text.zIndex;
-                                       }
-                                       final totalTracks = (_draggingTextId != null ? (activeMaxZ + 2) : (activeMaxZ + 1)).clamp(1, 8);
-
+                                       final totalTracks = _computeActiveTextTracks(project);
                                        return List.generate(
                                          totalTracks,
                                          (i) => Container(
@@ -559,12 +554,21 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
     );
   }
 
-  List<Widget> _buildTextTracks(EditorProjectModel project, EditorProjectNotifier notifier) {
-    int activeMaxZ = 0;
-    for (final textLayer in project.textLayers) {
-      if (textLayer.zIndex > activeMaxZ) activeMaxZ = textLayer.zIndex;
+  int _computeActiveTextTracks(EditorProjectModel project) {
+    if (project.textLayers.isEmpty) return 0;
+    int maxZ = 0;
+    for (final text in project.textLayers) {
+      if (text.zIndex > maxZ) maxZ = text.zIndex;
     }
-    final totalTracks = (_draggingTextId != null ? (activeMaxZ + 2) : (activeMaxZ + 1)).clamp(1, 8);
+    if (_draggingTextId != null) {
+      maxZ += 1;
+    }
+    return (maxZ + 1).clamp(1, 8);
+  }
+
+  List<Widget> _buildTextTracks(EditorProjectModel project, EditorProjectNotifier notifier) {
+    final totalTracks = _computeActiveTextTracks(project);
+    if (totalTracks == 0) return [];
 
     final List<List<TextLayerModel>> textRows = List.generate(totalTracks, (_) => []);
     for (final textLayer in project.textLayers) {
@@ -593,6 +597,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
             final maxEnd = index < row.length - 1 ? row[index + 1].startTime : project.duration;
 
             return Positioned(
+              key: ValueKey('text_track_${text.id}'),
               left: text.startTime * _timeScale,
               width: width,
               top: 0,

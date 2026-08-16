@@ -74,55 +74,91 @@ class FFmpegExportService {
 
     Map<int, int> stickerIndices = {};
     for (var sticker in stickerLayers) {
-      inputArgs.add('-i "${sticker.path}"');
+      inputArgs.add('-loop 1 -t $durationStr -i "${sticker.path}"');
       stickerIndices[stickerIndices.length] = inputIndex++;
     }
 
     String filterGraph = '';
     String lastVideoLink = '[bg]';
     
-    // 1. Scale background video
+    // 1. Scale background video & ensure yuv420p format
     if (videoLayers.isNotEmpty) {
-      filterGraph += '[$videoIdx:v]scale=$width:$height:force_original_aspect_ratio=decrease,pad=$width:$height:(ow-iw)/2:(oh-ih)/2[bg];';
+      filterGraph += '[$videoIdx:v]scale=$width:$height:force_original_aspect_ratio=decrease,pad=$width:$height:(ow-iw)/2:(oh-ih)/2,format=yuv420p[bg];';
     } else {
-      filterGraph += '[$videoIdx:v]null[bg];';
+      filterGraph += '[$videoIdx:v]format=yuv420p[bg];';
     }
 
-    // 2. Add Stickers
+    // 2. Add Stickers with format=rgba and eof_action=pass
     for (int i = 0; i < stickerLayers.length; i++) {
       final sticker = stickerLayers[i];
       final idx = stickerIndices[i];
+      final fmtLink = '[stk_fmt$i]';
       final nextLink = '[v_st$i]';
-      // simple normalized positioning for sticker
+      
       final dx = sticker.position.dx;
       final dy = sticker.position.dy;
-      // sticker x = W*dx - w/2 (center anchored), y = H*dy - h/2
       final xExpr = 'W*$dx-w/2';
       final yExpr = 'H*$dy-h/2';
       
       final start = sticker.startTime.toStringAsFixed(2);
       final end = (sticker.startTime + sticker.mediaDuration).toStringAsFixed(2);
       
-      filterGraph += '$lastVideoLink[$idx:v]overlay=x=\'$xExpr\':y=\'$yExpr\':enable=\'between(t,$start,$end)\'$nextLink;';
+      filterGraph += '[$idx:v]format=rgba$fmtLink;$lastVideoLink$fmtLink'
+          'overlay=x=\'$xExpr\':y=\'$yExpr\':enable=\'between(t,$start,$end)\':eof_action=pass$nextLink;';
       lastVideoLink = nextLink;
     }
 
-    // 3. Add Text Layers
+    // 3. Add Text Layers with format=rgba and eof_action=pass
     for (int i = 0; i < textLayers.length; i++) {
       final text = textLayers[i];
+      final fmtLink = '[txt_fmt$i]';
       final nextLink = '[v_txt$i]';
       
       final imagePath = await _generateTextImage(text, width, height, project.canvasWidth, project.canvasHeight);
-      inputArgs.add('-i "$imagePath"');
-      // inputArgs has 1 item per '-i' argument right now? Wait, no! 
-      // Look at inputArgs collection above!
-      // Let's count '-i' in inputArgs.
-      final textInputIdx = inputArgs.where((arg) => arg.startsWith('-i')).length - 1;
+      inputArgs.add('-loop 1 -t $durationStr -i "$imagePath"');
+      final textInputIdx = inputIndex++;
 
       final start = text.startTime.toStringAsFixed(2);
       final end = text.endTime.toStringAsFixed(2);
+      final dur = text.animationDuration.clamp(0.1, 5.0).toStringAsFixed(2);
 
-      filterGraph += '$lastVideoLink[$textInputIdx:v]overlay=x=0:y=0:enable=\'between(t,$start,$end)\'$nextLink;';
+      final logicalH = project.canvasHeight > 0 ? project.canvasHeight : 640.0;
+      final slideOffset = (30.0 * (height / logicalH)).round();
+
+      String yExpr = '0';
+      String preFilter = 'format=rgba';
+
+      switch (text.animation) {
+        case TextAnimationType.fadeIn:
+        case TextAnimationType.blurIn:
+        case TextAnimationType.popIn:
+        case TextAnimationType.zoomIn:
+        case TextAnimationType.stamp:
+        case TextAnimationType.wave:
+        case TextAnimationType.glow:
+        case TextAnimationType.typewriter:
+          preFilter = 'fade=t=in:st=$start:d=$dur:alpha=1,format=rgba';
+          break;
+        case TextAnimationType.slideUp:
+          preFilter = 'fade=t=in:st=$start:d=$dur:alpha=1,format=rgba';
+          yExpr = 'if(lt(t,$start+$dur),(1-(t-$start)/$dur)*$slideOffset,0)';
+          break;
+        case TextAnimationType.slideDown:
+          preFilter = 'fade=t=in:st=$start:d=$dur:alpha=1,format=rgba';
+          yExpr = 'if(lt(t,$start+$dur),-(1-(t-$start)/$dur)*$slideOffset,0)';
+          break;
+        case TextAnimationType.bounce:
+          preFilter = 'fade=t=in:st=$start:d=0.2:alpha=1,format=rgba';
+          yExpr = 'if(lt(t,$start+$dur),-abs(sin((t-$start)/$dur*3.14159))*$slideOffset,0)';
+          break;
+        case TextAnimationType.none:
+        default:
+          preFilter = 'format=rgba';
+          break;
+      }
+
+      filterGraph += '[$textInputIdx:v]$preFilter$fmtLink;$lastVideoLink$fmtLink'
+          'overlay=x=0:y=\'$yExpr\':enable=\'between(t,$start,$end)\':eof_action=pass$nextLink;';
       lastVideoLink = nextLink;
     }
 
@@ -188,8 +224,7 @@ class FFmpegExportService {
 
   static Future<String> _generateTextImage(TextLayerModel textLayer, int targetWidth, int targetHeight, double canvasWidth, double canvasHeight) async {
     // We use the exact canvas width the user had while editing for 1:1 mapping.
-    final double logicalWidth = canvasWidth;
-    
+    final double logicalWidth = canvasWidth > 0 ? canvasWidth : 360.0;
     final double scaleFactor = targetWidth / logicalWidth;
 
     final recorder = ui.PictureRecorder();
@@ -213,6 +248,7 @@ class FFmpegExportService {
       fontWeight: textLayer.fontWeight,
       fontStyle: textLayer.fontStyle,
       letterSpacing: textLayer.letterSpacing,
+      height: textLayer.lineSpacing,
       shadows: [
          Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), blurRadius: (textLayer.strokeColor != null ? textLayer.strokeWidth : 2.0) * 1.5),
          Shadow(color: textLayer.strokeColor ?? Colors.black.withOpacity(0.9), offset: const Offset(1, 1)),
@@ -248,10 +284,10 @@ class FFmpegExportService {
     final double padH = hasBubble ? 48.0 : 32.0;
     final double padV = hasBubble ? 24.0 : 16.0;
 
-    final maxW = (textLayer.boxWidth != null) ? (textLayer.boxWidth! - padH) : ((logicalWidth * 0.90) - padH).clamp(40.0, logicalWidth);
+    final maxW = (textLayer.boxWidth != null) ? (textLayer.boxWidth! - padH) : ((logicalWidth * 0.95) - padH).clamp(40.0, logicalWidth);
     textPainter.layout(minWidth: 0, maxWidth: maxW);
 
-    final double boxW = textLayer.boxWidth ?? (textPainter.width + padH).clamp(40.0, logicalWidth * 0.90);
+    final double boxW = textLayer.boxWidth ?? (textPainter.width + padH).clamp(40.0, logicalWidth * 0.95);
     final double boxH = textLayer.boxHeight ?? (textPainter.height + padV).clamp(30.0, double.infinity);
 
     canvas.translate(-boxW / 2, -boxH / 2);
@@ -272,9 +308,32 @@ class FFmpegExportService {
       canvas.drawRRect(rrect, paint);
     }
 
-    final double textX = (boxW - textPainter.width) / 2;
-    final double textY = (boxH - textPainter.height) / 2;
-    textPainter.paint(canvas, Offset(textX, textY));
+    // Mathematical 1:1 match for FittedBox(fit: BoxFit.scaleDown) from editor
+    final double availTextW = (boxW - padH).clamp(1.0, double.infinity);
+    final double availTextH = (boxH - padV).clamp(1.0, double.infinity);
+    double innerScale = 1.0;
+    if (textLayer.boxWidth != null || textLayer.boxHeight != null) {
+      if (textPainter.width > availTextW) {
+        innerScale = (availTextW / textPainter.width).clamp(0.01, 1.0);
+      }
+      if (textPainter.height > availTextH) {
+        final hScale = (availTextH / textPainter.height).clamp(0.01, 1.0);
+        if (hScale < innerScale) innerScale = hScale;
+      }
+    }
+
+    final double textX = (boxW - (textPainter.width * innerScale)) / 2;
+    final double textY = (boxH - (textPainter.height * innerScale)) / 2;
+
+    if (innerScale < 1.0) {
+      canvas.save();
+      canvas.translate(textX, textY);
+      canvas.scale(innerScale, innerScale);
+      textPainter.paint(canvas, Offset.zero);
+      canvas.restore();
+    } else {
+      textPainter.paint(canvas, Offset(textX, textY));
+    }
 
     if (textLayer.opacity < 1.0) {
       canvas.restore();

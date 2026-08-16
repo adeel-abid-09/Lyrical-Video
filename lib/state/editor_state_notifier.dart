@@ -39,9 +39,13 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
 
   void _triggerAutoSave() {
     _autoSaveTimer?.cancel();
+    if (_isNewProject && state.mediaLayers.isEmpty && state.textLayers.isEmpty) {
+      return; // Do not auto-save untouched empty projects into recent projects!
+    }
     _autoSaveTimer = Timer(const Duration(milliseconds: 1500), () async {
       await ProjectStorageService.saveProject(state);
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('editor_restore_session_id', state.id);
       await prefs.setString('active_session_id', state.id);
     });
   }
@@ -90,13 +94,14 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
 
   Future<void> discardSession() async {
     _autoSaveTimer?.cancel();
-    if (_isNewProject) {
-      await ProjectStorageService.deleteProject(state.id);
-    } else if (_originalProjectData != null) {
+    await ProjectStorageService.deleteProject(state.id);
+    if (!_isNewProject && _originalProjectData != null) {
       await ProjectStorageService.saveProject(_originalProjectData!);
     }
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('editor_restore_session_id');
     await prefs.remove('active_session_id');
+    resetProject();
   }
 
   void updateProjectCanvasSize(double width, double height) {
@@ -108,7 +113,10 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   Future<void> saveAsDraft() async {
     _autoSaveTimer?.cancel();
     await ProjectStorageService.saveProject(state);
+    _isNewProject = false;
+    _originalProjectData = state;
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('editor_restore_session_id');
     await prefs.remove('active_session_id');
   }
 
@@ -126,6 +134,8 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void resetProject() {
+    _isNewProject = true;
+    _originalProjectData = null;
     _undoStack.clear();
     _redoStack.clear();
     state = EditorProjectModel(

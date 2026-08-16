@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:uuid/uuid.dart';
+import '../models/text_layer_model.dart';
 import '../state/editor_state_notifier.dart';
 import '../theme/app_theme.dart';
 import '../widgets/editor/horizontal_toolbars.dart';
@@ -31,13 +33,22 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _persistSession();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _clearRestoreSession();
     super.dispose();
+  }
+
+  Future<void> _persistSession() async {
+    final project = ref.read(editorProjectProvider);
+    if (project.mediaLayers.isNotEmpty || project.textLayers.isNotEmpty) {
+      await ProjectStorageService.saveProject(project);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('editor_restore_session_id', project.id);
+    }
   }
 
   Future<void> _clearRestoreSession() async {
@@ -47,14 +58,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
-      final project = ref.read(editorProjectProvider);
-      if (project.mediaLayers.isNotEmpty || project.textLayers.isNotEmpty) {
-        ProjectStorageService.saveProject(project).then((_) async {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('editor_restore_session_id', project.id);
-        });
-      }
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached || state == AppLifecycleState.hidden) {
+      // Pause playback immediately so background uses 0 CPU/Audio resources
+      ref.read(editorProjectProvider.notifier).setPlaying(false);
+      _persistSession();
     }
   }
 
@@ -94,6 +101,64 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     );
   }
 
+  final List<String> _sessionPlacedLyricLayerIds = [];
+
+  Future<void> _handleCancelQueuedLyrics(BuildContext context) async {
+    final notifier = ref.read(editorProjectProvider.notifier);
+    if (_sessionPlacedLyricLayerIds.isEmpty) {
+      notifier.clearQueuedLyrics();
+      return;
+    }
+
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2C),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Row(
+          children: [
+            Icon(Icons.help_outline_rounded, color: Colors.orangeAccent, size: 24),
+            SizedBox(width: 8),
+            Text('Cancel Lyrics Queue?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17)),
+          ],
+        ),
+        content: Text(
+          'You have placed ${_sessionPlacedLyricLayerIds.length} lyric ${_sessionPlacedLyricLayerIds.length == 1 ? "line" : "lines"} on your timeline.\n\nDo you want to keep the placed lyrics or remove them?',
+          style: const TextStyle(color: Colors.white70, fontSize: 13.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'continue'),
+            child: const Text('Continue Placing', style: TextStyle(color: Colors.white60)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'remove_all'),
+            child: const Text('Remove Placed', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, 'keep_placed'),
+            child: const Text('Keep Placed', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (choice == 'keep_placed') {
+      notifier.clearQueuedLyrics();
+      _sessionPlacedLyricLayerIds.clear();
+    } else if (choice == 'remove_all') {
+      for (final id in _sessionPlacedLyricLayerIds) {
+        notifier.deleteTextLayer(id);
+      }
+      notifier.clearQueuedLyrics();
+      _sessionPlacedLyricLayerIds.clear();
+    }
+  }
+
   Future<bool> _onWillPop() async {
     if (_isTextEditorOpen) {
       _closeTextEditor();
@@ -121,9 +186,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
 
     if (shouldSave == true) {
       await ref.read(editorProjectProvider.notifier).saveAsDraft();
+      await _clearRestoreSession();
       return true;
     } else if (shouldSave == false) {
       await ref.read(editorProjectProvider.notifier).discardSession();
+      await _clearRestoreSession();
       return true;
     }
     return false; // Cancel
@@ -257,19 +324,71 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
           ),
         ),
       ), // close SafeArea
-      floatingActionButton: project.queuedLyrics.isEmpty ? null : FloatingActionButton.extended(
-        onPressed: () {
-          final lineText = project.queuedLyrics.first;
-          final notifier = ref.read(editorProjectProvider.notifier);
-          notifier.popQueuedLyric();
-          
-          final startTime = project.currentPlayheadTime;
-          notifier.addTextLayer(lineText, position: const Offset(0.5, 0.75));
-        },
-        backgroundColor: Colors.cyanAccent,
-        icon: const Icon(Icons.add_location_alt_rounded, color: Colors.black),
-        label: Text('Drop Lyric (${project.queuedLyrics.length})', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-      ),
+      floatingActionButton: project.queuedLyrics.isEmpty
+          ? null
+          : Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B1B2A).withOpacity(0.95),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: Colors.cyanAccent.withOpacity(0.4), width: 1.2),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 16, offset: const Offset(0, 4)),
+                  BoxShadow(color: Colors.cyanAccent.withOpacity(0.15), blurRadius: 12),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 1. Paste Next Lyric Button
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.cyanAccent,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      elevation: 0,
+                    ),
+                    icon: const Icon(Icons.playlist_add_check_rounded, color: Colors.black, size: 20),
+                    label: Text(
+                      'Paste Lyric (${project.queuedLyrics.length} left)',
+                      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    onPressed: () {
+                      final lineText = project.queuedLyrics.first;
+                      final notifier = ref.read(editorProjectProvider.notifier);
+                      notifier.popQueuedLyric();
+                      
+                      final startTime = project.currentPlayheadTime;
+                      final newLayer = TextLayerModel(
+                        id: const Uuid().v4(),
+                        text: lineText,
+                        startTime: startTime,
+                        endTime: (startTime + 3.0).clamp(0.0, project.duration),
+                        position: const Offset(0.5, 0.75),
+                      );
+                      _sessionPlacedLyricLayerIds.add(newLayer.id);
+                      notifier.addTextLayers([newLayer]);
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  // 2. Cancel Queue Button
+                  InkWell(
+                    onTap: () => _handleCancelQueuedLyrics(context),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.redAccent.withOpacity(0.4), width: 1),
+                      ),
+                      child: const Icon(Icons.close_rounded, color: Colors.redAccent, size: 18),
+                    ),
+                  ),
+                ],
+              ),
+            ),
     ),
   );
 }

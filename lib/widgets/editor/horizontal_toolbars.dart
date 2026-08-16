@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../models/media_layer_model.dart';
 import '../../models/text_layer_model.dart';
 import '../../services/groq_auto_lyrics_service.dart';
+import '../../state/auto_lyrics_notifier.dart';
 import '../../state/editor_state_notifier.dart';
 import '../../theme/app_theme.dart';
 import 'online_lyrics_dialog.dart';
@@ -17,6 +19,7 @@ import 'text_bubble_painter.dart';
 import 'text_animation_preview_tile.dart';
 import 'text_template_preview_tile.dart';
 import 'text_effect_preview_tile.dart';
+import 'custom_hsv_color_picker.dart';
 
 enum ToolbarCategory {
   main,
@@ -67,23 +70,46 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     'Outfit',
     'Inter',
     'Roboto',
-    'Bebas Neue',
-    'Playfair Display',
+    'Rubik',
+    'Bangers',
+    'Solitreo',
+    'Ephesis',
+    'Rye',
     'Montserrat',
+    'Bebas Neue',
+    'Oswald',
+    'Playfair Display',
+    'Prompt',
+    'Bowlby One',
+    'PT Sans',
+    'Chonburi',
+    'Tangerine',
+    'Caveat',
+    'Permanent Marker',
+    'Sacramento',
+    'Great Vibes',
+    'Cinzel Decorative',
+    'Creepster',
+    'Righteous',
+    'Abril Fatface',
+    'Comfortaa',
+    'Satisfy',
+    'Monoton',
+    'Press Start 2P',
+    'Alfa Slab One',
+    'Courgette',
     'Pacifico',
     'Dancing Script',
     'Lobster',
     'Anton',
-    'Oswald',
     'Poppins',
     'Nunito',
     'Merriweather',
     'Cinzel',
-    'Permanent Marker',
-    'Bangers',
-    'Creepster',
-    'Righteous',
     'Amatic SC',
+    'Kaushan Script',
+    'Syne',
+    'Fredoka',
   ];
 
   static const List<Color> _presetColors = [
@@ -175,40 +201,140 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     required double min,
     required double max,
     required ValueChanged<double> onChanged,
+    String unit = '',
+    bool isInteger = true,
   }) {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF14141E),
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
         double currentValue = initialValue;
+        final textController = TextEditingController(
+          text: isInteger ? currentValue.toInt().toString() : currentValue.toStringAsFixed(1),
+        );
+
         return StatefulBuilder(
           builder: (context, setSheetState) {
             return Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: EdgeInsets.only(
+                left: 24.0,
+                right: 24.0,
+                top: 20.0,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20.0,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      IconButton(
+                        icon: const Icon(Icons.check_circle_rounded, color: AppTheme.primaryAccent, size: 26),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Direct Input & Stepper Buttons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline_rounded, color: Colors.white70, size: 28),
+                        onPressed: () {
+                          final step = isInteger ? 1.0 : 0.1;
+                          final newVal = (currentValue - step).clamp(min, max);
+                          setSheetState(() {
+                            currentValue = newVal;
+                            textController.text = isInteger ? newVal.toInt().toString() : newVal.toStringAsFixed(1);
+                          });
+                          onChanged(newVal);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        width: 90,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF222232),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.cyanAccent.withOpacity(0.6), width: 1.2),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Flexible(
+                              child: TextField(
+                                controller: textController,
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                onChanged: (val) {
+                                  if (val.trim() == '-' || val.trim().isEmpty) return;
+                                  final parsed = double.tryParse(val);
+                                  if (parsed != null) {
+                                    final clamped = parsed.clamp(min, max);
+                                    setSheetState(() {
+                                      currentValue = clamped;
+                                    });
+                                    onChanged(clamped);
+                                  }
+                                },
+                              ),
+                            ),
+                            if (unit.isNotEmpty) ...[
+                              const SizedBox(width: 2),
+                              Text(unit, style: const TextStyle(color: Colors.cyanAccent, fontSize: 13, fontWeight: FontWeight.bold)),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white70, size: 28),
+                        onPressed: () {
+                          final step = isInteger ? 1.0 : 0.1;
+                          final newVal = (currentValue + step).clamp(min, max);
+                          setSheetState(() {
+                            currentValue = newVal;
+                            textController.text = isInteger ? newVal.toInt().toString() : newVal.toStringAsFixed(1);
+                          });
+                          onChanged(newVal);
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Slider
                   SliderTheme(
-                    data: SliderThemeData(
+                    data: const SliderThemeData(
                       activeTrackColor: AppTheme.primaryAccent,
                       inactiveTrackColor: Colors.white24,
                       thumbColor: AppTheme.primaryAccent,
                       trackHeight: 4.0,
                     ),
                     child: Slider(
-                      value: currentValue,
+                      value: currentValue.clamp(min, max),
                       min: min,
                       max: max,
                       onChanged: (val) {
-                        setSheetState(() => currentValue = val);
+                        setSheetState(() {
+                          currentValue = val;
+                          textController.text = isInteger ? val.toInt().toString() : val.toStringAsFixed(1);
+                        });
                         onChanged(val);
                       },
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                 ],
               ),
             );
@@ -245,36 +371,176 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
       }
     }
 
-    setState(() {
-      _isAutoLyricsLoading = true;
-    });
+    ref.read(autoLyricsProvider.notifier).startGeneration(targetLayer);
+    _showAutoLyricsProgressModal(targetLayer);
+  }
 
-    try {
-      final lyrics = await GroqAutoLyricsService.generateLyricsFromAudio(
-        targetLayer.path,
-        totalDuration: project.duration,
-      );
+  void _showAutoLyricsProgressModal(MediaLayerModel targetLayer) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return Consumer(
+          builder: (context, ref, _) {
+            final autoState = ref.watch(autoLyricsProvider);
 
-      ref.read(editorProjectProvider.notifier).addTextLayers(lyrics);
+            if (autoState.status == AutoLyricsStatus.success) {
+              Future.delayed(const Duration(milliseconds: 1400), () {
+                if (context.mounted && Navigator.canPop(context)) {
+                  Navigator.pop(context);
+                  ref.read(autoLyricsProvider.notifier).reset();
+                }
+              });
+            }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Generated ${lyrics.length} English auto-lyric lines!')),
+            return Center(
+              child: Dialog(
+                backgroundColor: Colors.transparent,
+                insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1B1B28),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: autoState.status == AutoLyricsStatus.success
+                          ? Colors.greenAccent.withOpacity(0.6)
+                          : autoState.status == AutoLyricsStatus.error
+                              ? Colors.redAccent.withOpacity(0.6)
+                              : const Color(0xFFFF9800).withOpacity(0.5),
+                      width: 1.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (autoState.status == AutoLyricsStatus.success
+                                ? Colors.greenAccent
+                                : autoState.status == AutoLyricsStatus.error
+                                    ? Colors.redAccent
+                                    : const Color(0xFFFF9800))
+                            .withOpacity(0.25),
+                        blurRadius: 24,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Status Icon / Animation
+                      if (autoState.status == AutoLyricsStatus.generating || autoState.status == AutoLyricsStatus.idle) ...[
+                        Container(
+                          width: 64,
+                          height: 64,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xFFFF9800).withOpacity(0.12),
+                          ),
+                          child: const CircularProgressIndicator(
+                            strokeWidth: 3.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF9800)),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text(
+                          'Generating AI Lyrics...',
+                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'AI is transcribing speech from your video audio...',
+                          style: TextStyle(color: Colors.white60, fontSize: 13),
+                          textAlign: TextAlign.center,
+                        ),
+                      ] else if (autoState.status == AutoLyricsStatus.success) ...[
+                        Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.greenAccent.withOpacity(0.15),
+                          ),
+                          child: const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 48),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text(
+                          '✨ Lyrics Generated!',
+                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Added ${autoState.generatedCount} synchronized lyric lines to your timeline.',
+                          style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          textAlign: TextAlign.center,
+                        ),
+                      ] else if (autoState.status == AutoLyricsStatus.error) ...[
+                        Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.redAccent.withOpacity(0.15),
+                          ),
+                          child: Icon(
+                            autoState.isNetworkError ? Icons.wifi_off_rounded : Icons.error_outline_rounded,
+                            color: Colors.redAccent,
+                            size: 44,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        Text(
+                          autoState.isNetworkError ? 'Network Connection Error' : 'Generation Failed',
+                          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          autoState.errorMessage,
+                          style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 22),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextButton(
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  ref.read(autoLyricsProvider.notifier).reset();
+                                },
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: const Text('Cancel', style: TextStyle(color: Colors.white60, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () => ref.read(autoLyricsProvider.notifier).startGeneration(targetLayer),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFFF9800),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: const Text('Retry', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Auto lyrics error: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isAutoLyricsLoading = false;
-        });
-      }
-    }
+      },
+    );
   }
 
   void _runAutoLyrics() {
@@ -294,7 +560,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               ),
               const SizedBox(height: 24),
               ListTile(
-                leading: const Icon(Icons.mic_rounded, color: Colors.cyanAccent),
+                leading: const Icon(Icons.auto_awesome_rounded, color: Color(0xFFFF9800)),
                 title: const Text('Auto Generate (Speech-to-Text)', style: TextStyle(color: Colors.white)),
                 subtitle: const Text('Uses AI to extract lyrics from video/audio', style: TextStyle(color: Colors.white54)),
                 onTap: () {
@@ -393,19 +659,14 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
 
           // Action Items / Sub-menus
           Expanded(
-            child: _activeCategory == ToolbarCategory.main
-                ? Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: _buildActiveToolbarItems(),
-                  )
-                : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Row(
-                      children: _buildActiveToolbarItems(),
-                    ),
-                  ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                children: _buildActiveToolbarItems(),
+              ),
+            ),
           ),
         ],
       ),
@@ -432,6 +693,13 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           _buildItem(Icons.audiotrack_rounded, 'Audio', () {
             setState(() => _activeCategory = ToolbarCategory.audio);
           }),
+          _buildItem(
+            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+            'Auto Lyrics',
+            _runAutoLyrics,
+            highlight: _isAutoLyricsLoading,
+            activeColor: const Color(0xFFFF9800),
+          ),
           _buildItem(Icons.video_library_rounded, 'Video', () {
             setState(() => _activeCategory = ToolbarCategory.video);
           }),
@@ -452,7 +720,8 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
               'Auto Lyrics',
               _runAutoLyrics,
-              highlight: true,
+              highlight: _isAutoLyricsLoading,
+              activeColor: const Color(0xFFFF9800),
             ),
           ],
           if (selectedText != null) ...[
@@ -512,6 +781,80 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           _buildItem(Icons.palette_rounded, 'Text Color', () {
             setState(() => _activeCategory = ToolbarCategory.textColor);
           }),
+          _buildItem(Icons.format_size_rounded, 'Size', () {
+            final project = ref.read(editorProjectProvider);
+            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+            if (selectedText != null) {
+              _showSliderBottomSheet(
+                title: 'Font Size',
+                initialValue: selectedText.fontSize,
+                min: 10.0,
+                max: 150.0,
+                unit: 'px',
+                isInteger: true,
+                onChanged: (val) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(fontSize: val));
+                },
+              );
+            }
+          }),
+          _buildItem(Icons.rotate_right_rounded, 'Rotate', () {
+            final project = ref.read(editorProjectProvider);
+            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+            if (selectedText != null) {
+              double currentDeg = (selectedText.rotation * 180 / pi) % 360;
+              if (currentDeg > 180) currentDeg -= 360;
+              if (currentDeg < -180) currentDeg += 360;
+
+              _showSliderBottomSheet(
+                title: 'Rotation',
+                initialValue: currentDeg,
+                min: -180.0,
+                max: 180.0,
+                unit: '°',
+                isInteger: true,
+                onChanged: (deg) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    selectedText.copyWith(rotation: deg * pi / 180.0),
+                  );
+                },
+              );
+            }
+          }),
+          _buildItem(Icons.format_line_spacing_rounded, 'Line Spacing', () {
+            final project = ref.read(editorProjectProvider);
+            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+            if (selectedText != null) {
+              _showSliderBottomSheet(
+                title: 'Line Spacing',
+                initialValue: selectedText.lineSpacing,
+                min: 0.8,
+                max: 3.0,
+                unit: 'x',
+                isInteger: false,
+                onChanged: (val) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(lineSpacing: val));
+                },
+              );
+            }
+          }),
+          _buildItem(Icons.space_bar_rounded, 'Letter Spacing', () {
+            final project = ref.read(editorProjectProvider);
+            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+            if (selectedText != null) {
+              _showSliderBottomSheet(
+                title: 'Letter Spacing',
+                initialValue: selectedText.letterSpacing,
+                min: -2.0,
+                max: 20.0,
+                unit: 'px',
+                isInteger: false,
+                onChanged: (val) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(letterSpacing: val));
+                },
+              );
+            }
+          }),
           _buildItem(Icons.border_color_rounded, 'Stroke', () {
             setState(() => _activeCategory = ToolbarCategory.textStroke);
           }),
@@ -520,21 +863,6 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           }),
           _buildItem(Icons.crop_free_rounded, 'Background', () {
             setState(() => _activeCategory = ToolbarCategory.textBackground);
-          }),
-          _buildItem(Icons.format_size_rounded, 'Size', () {
-            final project = ref.read(editorProjectProvider);
-            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-            if (selectedText != null) {
-              _showSliderBottomSheet(
-                title: 'Font Size',
-                initialValue: selectedText.fontSize,
-                min: 12.0,
-                max: 80.0,
-                onChanged: (val) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(fontSize: val));
-                },
-              );
-            }
           }),
           _buildItem(Icons.opacity_rounded, 'Opacity', () {
             final project = ref.read(editorProjectProvider);
@@ -545,6 +873,8 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                 initialValue: selectedText.opacity,
                 min: 0.0,
                 max: 1.0,
+                unit: '',
+                isInteger: false,
                 onChanged: (val) {
                   ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(opacity: val));
                 },
@@ -614,29 +944,112 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         final project = ref.watch(editorProjectProvider);
         final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
 
-        return _presetColors.map((color) {
-          final isSelected = selectedText?.textColor == color;
-          return GestureDetector(
+        return [
+          // 1. Font Size Control
+          GestureDetector(
             onTap: () {
               if (selectedText != null) {
-                ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(textColor: color));
+                _showSliderBottomSheet(
+                  title: 'Font Size',
+                  initialValue: selectedText.fontSize,
+                  min: 12.0,
+                  max: 80.0,
+                  onChanged: (val) {
+                    ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(fontSize: val));
+                  },
+                );
               }
             },
             child: Container(
-              width: 30,
-              height: 30,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
+              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isSelected ? const Color(0xFF00E5FF) : Colors.white54,
-                  width: isSelected ? 2.5 : 1,
-                ),
+                color: const Color(0xFF222232),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.cyanAccent.withOpacity(0.6), width: 1.2),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.format_size_rounded, size: 14, color: Colors.cyanAccent),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${selectedText?.fontSize.toInt() ?? 20}px',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
             ),
-          );
-        }).toList();
+          ),
+
+          // 2. Custom HSV 2D Color Spectrum Palette Picker Button
+          GestureDetector(
+            onTap: () {
+              if (selectedText != null) {
+                CustomHsvColorPickerSheet.show(
+                  context,
+                  initialColor: selectedText.textColor,
+                  onColorChanged: (newColor) {
+                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                      selectedText.copyWith(textColor: newColor),
+                    );
+                  },
+                );
+              }
+            },
+            child: Container(
+              width: 32,
+              height: 32,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const SweepGradient(
+                  colors: [
+                    Colors.red,
+                    Colors.yellow,
+                    Colors.green,
+                    Colors.cyan,
+                    Colors.blue,
+                    Colors.purple,
+                    Colors.red,
+                  ],
+                ),
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black45, blurRadius: 4),
+                ],
+              ),
+              child: const Center(
+                child: Icon(Icons.colorize_rounded, size: 15, color: Colors.white),
+              ),
+            ),
+          ),
+
+          // 3. Preset Quick Colors
+          ..._presetColors.map((color) {
+            final isSelected = selectedText?.textColor == color;
+            return GestureDetector(
+              onTap: () {
+                if (selectedText != null) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(textColor: color));
+                }
+              },
+              child: Container(
+                width: 30,
+                height: 30,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isSelected ? const Color(0xFF00E5FF) : Colors.white54,
+                    width: isSelected ? 2.5 : 1,
+                  ),
+                ),
+              ),
+            );
+          }),
+        ];
 
       case ToolbarCategory.textStroke:
         final project = ref.watch(editorProjectProvider);
@@ -652,13 +1065,18 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           Colors.purpleAccent
         ];
 
-        return colors.map((color) {
-          final isSelected = selectedText?.strokeColor == color;
-          return GestureDetector(
+        return [
+          GestureDetector(
             onTap: () {
               if (selectedText != null) {
-                ref.read(editorProjectProvider.notifier).updateTextLayer(
-                  selectedText.copyWith(strokeColor: color == Colors.transparent ? null : color),
+                CustomHsvColorPickerSheet.show(
+                  context,
+                  initialColor: selectedText.strokeColor ?? Colors.black,
+                  onColorChanged: (newColor) {
+                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                      selectedText.copyWith(strokeColor: newColor, strokeWidth: selectedText.strokeWidth > 0 ? selectedText.strokeWidth : 2.0),
+                    );
+                  },
                 );
               }
             },
@@ -667,19 +1085,57 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               height: 30,
               margin: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
-                color: color == Colors.transparent ? Colors.grey[800] : color,
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: isSelected ? const Color(0xFF00E5FF) : Colors.white54,
-                  width: isSelected ? 2.5 : 1,
+                gradient: const SweepGradient(
+                  colors: [
+                    Colors.red,
+                    Colors.yellow,
+                    Colors.green,
+                    Colors.cyan,
+                    Colors.blue,
+                    Colors.purple,
+                    Colors.red,
+                  ],
                 ),
+                border: Border.all(color: Colors.white, width: 1.8),
               ),
-              child: color == Colors.transparent
-                  ? const Icon(Icons.close_rounded, size: 16, color: Colors.white54)
-                  : null,
+              child: const Center(
+                child: Icon(Icons.colorize_rounded, size: 14, color: Colors.white),
+              ),
             ),
-          );
-        }).toList();
+          ),
+          ...colors.map((color) {
+            final isSelected = selectedText?.strokeColor == color;
+            return GestureDetector(
+              onTap: () {
+                if (selectedText != null) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    selectedText.copyWith(
+                      strokeColor: color == Colors.transparent ? null : color,
+                      strokeWidth: color == Colors.transparent ? 0.0 : (selectedText.strokeWidth > 0 ? selectedText.strokeWidth : 2.0),
+                    ),
+                  );
+                }
+              },
+              child: Container(
+                width: 30,
+                height: 30,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: color == Colors.transparent ? Colors.grey[800] : color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isSelected ? const Color(0xFF00E5FF) : Colors.white54,
+                    width: isSelected ? 2.5 : 1,
+                  ),
+                ),
+                child: color == Colors.transparent
+                    ? const Icon(Icons.close_rounded, size: 16, color: Colors.white54)
+                    : null,
+              ),
+            );
+          }),
+        ];
 
       case ToolbarCategory.textGlow:
         final project = ref.watch(editorProjectProvider);
@@ -696,16 +1152,18 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           Colors.white,
         ];
 
-        return colors.map((color) {
-          final isSelected = selectedText?.strokeColor == color;
-          return GestureDetector(
+        return [
+          GestureDetector(
             onTap: () {
               if (selectedText != null) {
-                ref.read(editorProjectProvider.notifier).updateTextLayer(
-                  selectedText.copyWith(
-                    strokeColor: color == Colors.transparent ? null : color,
-                    strokeWidth: color == Colors.transparent ? 0.0 : 4.0,
-                  ),
+                CustomHsvColorPickerSheet.show(
+                  context,
+                  initialColor: selectedText.strokeColor ?? Colors.cyanAccent,
+                  onColorChanged: (newColor) {
+                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                      selectedText.copyWith(strokeColor: newColor, strokeWidth: 4.0),
+                    );
+                  },
                 );
               }
             },
@@ -714,19 +1172,57 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               height: 30,
               margin: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
-                color: color == Colors.transparent ? Colors.grey[800] : color,
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: isSelected ? const Color(0xFF00E5FF) : Colors.white54,
-                  width: isSelected ? 2.5 : 1,
+                gradient: const SweepGradient(
+                  colors: [
+                    Colors.red,
+                    Colors.yellow,
+                    Colors.green,
+                    Colors.cyan,
+                    Colors.blue,
+                    Colors.purple,
+                    Colors.red,
+                  ],
                 ),
+                border: Border.all(color: Colors.white, width: 1.8),
               ),
-              child: color == Colors.transparent
-                  ? const Icon(Icons.close_rounded, size: 16, color: Colors.white54)
-                  : null,
+              child: const Center(
+                child: Icon(Icons.colorize_rounded, size: 14, color: Colors.white),
+              ),
             ),
-          );
-        }).toList();
+          ),
+          ...colors.map((color) {
+            final isSelected = selectedText?.strokeColor == color;
+            return GestureDetector(
+              onTap: () {
+                if (selectedText != null) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    selectedText.copyWith(
+                      strokeColor: color == Colors.transparent ? null : color,
+                      strokeWidth: color == Colors.transparent ? 0.0 : 4.0,
+                    ),
+                  );
+                }
+              },
+              child: Container(
+                width: 30,
+                height: 30,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: color == Colors.transparent ? Colors.grey[800] : color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isSelected ? const Color(0xFF00E5FF) : Colors.white54,
+                    width: isSelected ? 2.5 : 1,
+                  ),
+                ),
+                child: color == Colors.transparent
+                    ? const Icon(Icons.close_rounded, size: 16, color: Colors.white54)
+                    : null,
+              ),
+            );
+          }),
+        ];
 
       case ToolbarCategory.textBackground:
         final project = ref.watch(editorProjectProvider);
@@ -742,16 +1238,21 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           Colors.purpleAccent,
         ];
 
-        return colors.map((color) {
-          final isSelected = selectedText?.backgroundColor == color;
-          return GestureDetector(
+        return [
+          GestureDetector(
             onTap: () {
               if (selectedText != null) {
-                ref.read(editorProjectProvider.notifier).updateTextLayer(
-                  selectedText.copyWith(
-                    backgroundColor: color == Colors.transparent ? null : color,
-                    textColor: (color == Colors.yellowAccent || color == Colors.white) ? Colors.black : Colors.white,
-                  ),
+                CustomHsvColorPickerSheet.show(
+                  context,
+                  initialColor: selectedText.backgroundColor ?? Colors.black87,
+                  onColorChanged: (newColor) {
+                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                      selectedText.copyWith(
+                        backgroundColor: newColor,
+                        textColor: (newColor.computeLuminance() > 0.5) ? Colors.black : Colors.white,
+                      ),
+                    );
+                  },
                 );
               }
             },
@@ -760,19 +1261,57 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               height: 30,
               margin: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
-                color: color == Colors.transparent ? Colors.grey[800] : color,
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: isSelected ? const Color(0xFF00E5FF) : Colors.white54,
-                  width: isSelected ? 2.5 : 1,
+                gradient: const SweepGradient(
+                  colors: [
+                    Colors.red,
+                    Colors.yellow,
+                    Colors.green,
+                    Colors.cyan,
+                    Colors.blue,
+                    Colors.purple,
+                    Colors.red,
+                  ],
                 ),
+                border: Border.all(color: Colors.white, width: 1.8),
               ),
-              child: color == Colors.transparent
-                  ? const Icon(Icons.close_rounded, size: 16, color: Colors.white54)
-                  : null,
+              child: const Center(
+                child: Icon(Icons.colorize_rounded, size: 14, color: Colors.white),
+              ),
             ),
-          );
-        }).toList();
+          ),
+          ...colors.map((color) {
+            final isSelected = selectedText?.backgroundColor == color;
+            return GestureDetector(
+              onTap: () {
+                if (selectedText != null) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    selectedText.copyWith(
+                      backgroundColor: color == Colors.transparent ? null : color,
+                      textColor: (color == Colors.yellowAccent || color == Colors.white) ? Colors.black : Colors.white,
+                    ),
+                  );
+                }
+              },
+              child: Container(
+                width: 30,
+                height: 30,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: color == Colors.transparent ? Colors.grey[800] : color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isSelected ? const Color(0xFF00E5FF) : Colors.white54,
+                    width: isSelected ? 2.5 : 1,
+                  ),
+                ),
+                child: color == Colors.transparent
+                    ? const Icon(Icons.close_rounded, size: 16, color: Colors.white54)
+                    : null,
+              ),
+            );
+          }),
+        ];
 
       case ToolbarCategory.textFont:
         final project = ref.watch(editorProjectProvider);
@@ -900,21 +1439,73 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         final project = ref.watch(editorProjectProvider);
         final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
 
-        return TextAnimationRegistry.animations.map((def) {
-          final isSelected = (selectedText?.animation == def.type);
+        final items = <Widget>[];
 
-          return TextAnimationPreviewTile(
-            def: def,
-            isSelected: isSelected,
-            onTap: () {
-              if (selectedText != null) {
-                ref.read(editorProjectProvider.notifier).updateTextLayer(
-                  selectedText.copyWith(animation: def.type),
-                );
-              }
-            },
+        // Prominent CapCut-style Duration / Speed controller
+        if (selectedText != null && selectedText.animation != TextAnimationType.none) {
+          items.add(
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: InkWell(
+                onTap: () {
+                  _showSliderBottomSheet(
+                    title: 'Animation Duration',
+                    initialValue: selectedText.animationDuration,
+                    min: 0.2,
+                    max: 5.0,
+                    unit: 's',
+                    isInteger: false,
+                    onChanged: (val) {
+                      ref.read(editorProjectProvider.notifier).updateTextLayer(
+                        selectedText.copyWith(animationDuration: val),
+                      );
+                    },
+                  );
+                },
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryAccent.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppTheme.primaryAccent, width: 1.2),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.timer_outlined, color: AppTheme.primaryAccent, size: 16),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${selectedText.animationDuration.toStringAsFixed(1)}s',
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           );
-        }).toList();
+        }
+
+        items.addAll(
+          TextAnimationRegistry.animations.map((def) {
+            final isSelected = (selectedText?.animation == def.type);
+
+            return TextAnimationPreviewTile(
+              def: def,
+              isSelected: isSelected,
+              onTap: () {
+                if (selectedText != null) {
+                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    selectedText.copyWith(animation: def.type),
+                  );
+                }
+              },
+            );
+          }),
+        );
+
+        return items;
 
       case ToolbarCategory.textBubbles:
         final project = ref.watch(editorProjectProvider);
@@ -957,28 +1548,23 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
       case ToolbarCategory.video:
         return [
           _buildItem(Icons.add_to_photos_rounded, 'Add Video', () => _pickVideo(replace: false)),
-          _buildItem(Icons.picture_in_picture_rounded, 'Overlay', () => _pickVideo(isOverlay: true)),
           _buildItem(Icons.settings_overscan_rounded, 'Trim', () {
             ref.read(editorProjectProvider.notifier).setTrimMode(true);
           }),
+          _buildItem(
+            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+            'Auto Lyrics',
+            _runAutoLyrics,
+            highlight: _isAutoLyricsLoading,
+            activeColor: const Color(0xFFFF9800),
+          ),
           _buildItem(Icons.content_cut_rounded, 'Split', () {
             final project = ref.read(editorProjectProvider);
             if (project.selectedLayerId != null) {
               ref.read(editorProjectProvider.notifier).splitMediaLayer(project.selectedLayerId!, project.currentPlayheadTime);
             }
           }),
-          _buildItem(Icons.change_circle_outlined, 'Change', () => _pickVideo(replace: true)),
-          _buildItem(Icons.delete_outline_rounded, 'Delete', () {
-            final project = ref.read(editorProjectProvider);
-            if (project.selectedLayerId != null) {
-              ref.read(editorProjectProvider.notifier).deleteMediaLayer(project.selectedLayerId!);
-            }
-          }),
-          _buildItem(
-            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
-            'Auto Lyrics',
-            _runAutoLyrics,
-          ),
+          _buildItem(Icons.picture_in_picture_rounded, 'Overlay', () => _pickVideo(isOverlay: true)),
           _buildItem(Icons.library_music_rounded, 'Extract Audio', _extractAudio),
           _buildItem(
             Icons.volume_up_rounded,
@@ -993,6 +1579,8 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                 initialValue: layer.volume,
                 min: 0.0,
                 max: 1.0,
+                unit: '%',
+                isInteger: false,
                 onChanged: (val) {
                   ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(
                     layer.id, 
@@ -1003,6 +1591,13 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               );
             },
           ),
+          _buildItem(Icons.change_circle_outlined, 'Change', () => _pickVideo(replace: true)),
+          _buildItem(Icons.delete_outline_rounded, 'Delete', () {
+            final project = ref.read(editorProjectProvider);
+            if (project.selectedLayerId != null) {
+              ref.read(editorProjectProvider.notifier).deleteMediaLayer(project.selectedLayerId!);
+            }
+          }),
         ];
 
       case ToolbarCategory.audio:
@@ -1011,24 +1606,19 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           _buildItem(Icons.settings_overscan_rounded, 'Trim', () {
             ref.read(editorProjectProvider.notifier).setTrimMode(true);
           }),
+          _buildItem(
+            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+            'Auto Lyrics',
+            _runAutoLyrics,
+            highlight: _isAutoLyricsLoading,
+            activeColor: const Color(0xFFFF9800),
+          ),
           _buildItem(Icons.content_cut_rounded, 'Split', () {
             final project = ref.read(editorProjectProvider);
             if (project.selectedLayerId != null) {
               ref.read(editorProjectProvider.notifier).splitMediaLayer(project.selectedLayerId!, project.currentPlayheadTime);
             }
           }),
-          _buildItem(Icons.change_circle_outlined, 'Replace', () => _pickAudio(replace: true)),
-          _buildItem(Icons.delete_outline_rounded, 'Delete', () {
-            final project = ref.read(editorProjectProvider);
-            if (project.selectedLayerId != null) {
-              ref.read(editorProjectProvider.notifier).deleteMediaLayer(project.selectedLayerId!);
-            }
-          }),
-          _buildItem(
-            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
-            'Auto Lyrics',
-            _runAutoLyrics,
-          ),
           _buildItem(
             Icons.volume_up_rounded,
             'Volume',
@@ -1042,6 +1632,8 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                 initialValue: layer.volume,
                 min: 0.0,
                 max: 1.0,
+                unit: '%',
+                isInteger: false,
                 onChanged: (val) {
                   ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(
                     layer.id, 
@@ -1052,6 +1644,13 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               );
             },
           ),
+          _buildItem(Icons.change_circle_outlined, 'Replace', () => _pickAudio(replace: true)),
+          _buildItem(Icons.delete_outline_rounded, 'Delete', () {
+            final project = ref.read(editorProjectProvider);
+            if (project.selectedLayerId != null) {
+              ref.read(editorProjectProvider.notifier).deleteMediaLayer(project.selectedLayerId!);
+            }
+          }),
         ];
 
       default:
@@ -1059,7 +1658,8 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     }
   }
 
-  Widget _buildItem(IconData icon, String label, VoidCallback onTap, {bool highlight = false}) {
+  Widget _buildItem(IconData icon, String label, VoidCallback onTap, {bool highlight = false, Color? activeColor}) {
+    final col = activeColor ?? AppTheme.primaryAccent;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: InkWell(
@@ -1073,13 +1673,13 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               Icon(
                 icon,
                 size: 18,
-                color: highlight ? AppTheme.primaryAccent : Colors.white,
+                color: highlight ? col : Colors.white,
               ),
               const SizedBox(height: 2),
               Text(
                 label,
                 style: TextStyle(
-                  color: highlight ? AppTheme.primaryAccent : Colors.white70,
+                  color: highlight ? col : Colors.white70,
                   fontSize: 10,
                   fontWeight: highlight ? FontWeight.bold : FontWeight.normal,
                 ),
