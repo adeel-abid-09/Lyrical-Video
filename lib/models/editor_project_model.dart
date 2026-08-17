@@ -85,6 +85,7 @@ class EditorProjectModel {
     return {
       'id': id,
       'title': title,
+      'aspectRatio': aspectRatio.type.name,
       'duration': duration,
       'currentPlayheadTime': currentPlayheadTime,
       'isPlaying': isPlaying,
@@ -104,7 +105,12 @@ class EditorProjectModel {
     return EditorProjectModel(
       id: json['id'] as String? ?? '',
       title: json['title'] as String? ?? 'Lyrical Project',
-      aspectRatio: ProjectAspectRatio.default9x16,
+      aspectRatio: json['aspectRatio'] != null
+          ? ProjectAspectRatio.fromType(AspectRatioType.values.firstWhere(
+              (e) => e.name == json['aspectRatio'],
+              orElse: () => AspectRatioType.ratio9x16,
+            ))
+          : ProjectAspectRatio.default9x16,
       duration: (json['duration'] as num? ?? 15.0).toDouble(),
       mediaLayers: (json['mediaLayers'] as List<dynamic>? ?? [])
           .map((m) => MediaLayerModel.fromJson(m as Map<String, dynamic>))

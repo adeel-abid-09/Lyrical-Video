@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -28,8 +29,72 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
   double _dragTextInitialEnd = 0.0;
   int _dragTextInitialTrack = 0;
 
+  String? _draggingMediaId;
+  double _dragMediaInitialStart = 0.0;
+
+  Timer? _trimAutoScrollTimer;
+  final GlobalKey _timelineViewportKey = GlobalKey();
+
+  void _handleTrimDrag({
+    required DragUpdateDetails details,
+    required void Function(double deltaSeconds) onTrimDelta,
+  }) {
+    // 1. Instantaneous delta on current frame
+    final delta = details.delta.dx / _timeScale;
+    onTrimDelta(delta);
+
+    // 2. Continuous auto-scroll when reaching viewport edges
+    final box = _timelineViewportKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !_horizontalScrollController.hasClients) return;
+
+    final localX = box.globalToLocal(details.globalPosition).dx;
+    final viewWidth = box.size.width;
+
+    const edgeThreshold = 48.0;
+    if (localX < edgeThreshold) {
+      // Near Left Edge: auto-scroll left (backwards in time)
+      final speedFactor = ((edgeThreshold - localX) / edgeThreshold).clamp(0.2, 1.8);
+      _startTrimAutoScroll(direction: -1.0, speedFactor: speedFactor, onTrimDelta: onTrimDelta);
+    } else if (localX > viewWidth - edgeThreshold) {
+      // Near Right Edge: auto-scroll right (forward in time)
+      final speedFactor = ((localX - (viewWidth - edgeThreshold)) / edgeThreshold).clamp(0.2, 1.8);
+      _startTrimAutoScroll(direction: 1.0, speedFactor: speedFactor, onTrimDelta: onTrimDelta);
+    } else {
+      _stopTrimAutoScroll();
+    }
+  }
+
+  void _startTrimAutoScroll({
+    required double direction,
+    required double speedFactor,
+    required void Function(double deltaSeconds) onTrimDelta,
+  }) {
+    _trimAutoScrollTimer?.cancel();
+    _trimAutoScrollTimer = Timer.periodic(const Duration(milliseconds: 32), (timer) {
+      if (!_horizontalScrollController.hasClients) return;
+      
+      final double scrollStep = direction * (5.0 * speedFactor);
+      final double newOffset = (_horizontalScrollController.offset + scrollStep).clamp(
+        0.0,
+        _horizontalScrollController.position.maxScrollExtent,
+      );
+      
+      if ((newOffset - _horizontalScrollController.offset).abs() > 0.1) {
+        _horizontalScrollController.jumpTo(newOffset);
+        final deltaSeconds = scrollStep / _timeScale;
+        onTrimDelta(deltaSeconds);
+      }
+    });
+  }
+
+  void _stopTrimAutoScroll() {
+    _trimAutoScrollTimer?.cancel();
+    _trimAutoScrollTimer = null;
+  }
+
   @override
   void dispose() {
+    _trimAutoScrollTimer?.cancel();
     _horizontalScrollController.dispose();
     _verticalTracksController.dispose();
     _verticalHeadersController.dispose();
@@ -134,7 +199,8 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                   const playheadOffset = 100.0;
                   final trackWidth = (totalSeconds * _timeScale).clamp(0.0, double.infinity);
 
-                  final videoLayers = project.mediaLayers.where((m) => m.type == MediaType.video || m.type == MediaType.sticker).toList();
+                  final overlayLayers = project.mediaLayers.where((m) => m.isOverlay).toList();
+                  final mainMediaLayers = project.mediaLayers.where((m) => !m.isOverlay && (m.type == MediaType.video || m.type == MediaType.sticker)).toList();
                   final audioLayers = project.mediaLayers.where((m) => m.type == MediaType.audio).toList();
 
                   return GestureDetector(
@@ -173,6 +239,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                             return false;
                           },
                           child: SingleChildScrollView(
+                            key: _timelineViewportKey,
                             controller: _horizontalScrollController,
                             scrollDirection: Axis.horizontal,
                             physics: const BouncingScrollPhysics(),
@@ -205,8 +272,13 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                       top: 24,
                                       child: NotificationListener<ScrollNotification>(
                                         onNotification: (scrollNotif) {
-                                          if (scrollNotif.metrics.axis == Axis.vertical && _verticalHeadersController.hasClients) {
-                                            _verticalHeadersController.jumpTo(_verticalTracksController.offset);
+                                          if (scrollNotif.metrics.axis == Axis.vertical && _verticalHeadersController.hasClients && _verticalTracksController.hasClients) {
+                                            final offset = _verticalTracksController.offset;
+                                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                                              if (_verticalHeadersController.hasClients) {
+                                                _verticalHeadersController.jumpTo(offset.clamp(0.0, _verticalHeadersController.position.maxScrollExtent));
+                                              }
+                                            });
                                           }
                                           return false;
                                         },
@@ -216,96 +288,325 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              // Video Tracks (Always reserve space so audio is immediately below)
+                                              // 1. Overlay Tracks (Dynamically shown only when overlays exist)
+                                              if (overlayLayers.isNotEmpty)
+                                                Container(
+                                                   margin: const EdgeInsets.symmetric(vertical: 2),
+                                                   height: 26,
+                                                   child: Stack(
+                                                     children: overlayLayers.map((media) {
+                                                       final isSelected = project.selectedLayerId == media.id;
+                                                       final isDragging = _draggingMediaId == media.id;
+                                                       final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : (isDragging ? 0.85 : 1.0);
+                                                       return Positioned(
+                                                         left: media.startTime * _timeScale,
+                                                         width: (media.mediaDuration > 0 ? media.mediaDuration : duration) * _timeScale,
+                                                         top: 0,
+                                                         bottom: 0,
+                                                         child: Opacity(
+                                                           opacity: opacity,
+                                                           child: Container(
+                                                             decoration: BoxDecoration(
+                                                               gradient: isSelected
+                                                                   ? const LinearGradient(colors: [Color(0xFF9C27B0), Color(0xFFFF4081)])
+                                                                   : const LinearGradient(colors: [Color(0xFF673AB7), Color(0xFF512DA8)]),
+                                                               borderRadius: BorderRadius.circular(6),
+                                                               border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
+                                                               boxShadow: isDragging
+                                                                   ? [
+                                                                       BoxShadow(
+                                                                         color: const Color(0xFFFF4081).withOpacity(0.7),
+                                                                         blurRadius: 8,
+                                                                         spreadRadius: 1,
+                                                                       )
+                                                                     ]
+                                                                   : null,
+                                                             ),
+                                                             child: Stack(
+                                                               children: [
+                                                                 // 1. Middle Body (Long-Press to MOVE clip, Tap to select)
+                                                                 Positioned(
+                                                                   left: isSelected ? 14.0 : 0.0,
+                                                                   right: isSelected ? 14.0 : 0.0,
+                                                                   top: 0,
+                                                                   bottom: 0,
+                                                                   child: GestureDetector(
+                                                                     behavior: HitTestBehavior.opaque,
+                                                                     onTap: () => notifier.selectLayer(media.id),
+                                                                     onLongPressStart: (_) {
+                                                                       notifier.pushHistory();
+                                                                       setState(() {
+                                                                         _draggingMediaId = media.id;
+                                                                         _dragMediaInitialStart = media.startTime;
+                                                                       });
+                                                                     },
+                                                                     onLongPressMoveUpdate: (details) {
+                                                                       final deltaSeconds = details.localOffsetFromOrigin.dx / _timeScale;
+                                                                       final maxAllowedStart = (project.duration - media.mediaDuration).clamp(0.0, double.infinity);
+                                                                       final newStart = (_dragMediaInitialStart + deltaSeconds).clamp(0.0, maxAllowedStart);
+                                                                       notifier.updateMediaLayer(
+                                                                         media.copyWith(startTime: newStart),
+                                                                         recordHistory: false,
+                                                                       );
+                                                                     },
+                                                                     onLongPressEnd: (_) {
+                                                                       setState(() {
+                                                                         _draggingMediaId = null;
+                                                                       });
+                                                                     },
+                                                                     child: Container(
+                                                                       alignment: Alignment.center,
+                                                                       color: Colors.transparent,
+                                                                       child: Row(
+                                                                         mainAxisAlignment: MainAxisAlignment.center,
+                                                                         children: [
+                                                                           Icon(
+                                                                             media.type == MediaType.video ? Icons.videocam_rounded : Icons.photo_rounded,
+                                                                             size: 12,
+                                                                             color: Colors.white,
+                                                                           ),
+                                                                           const SizedBox(width: 4),
+                                                                           Text(
+                                                                             media.type == MediaType.video ? 'Overlay' : 'Overlay',
+                                                                             style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                                                           ),
+                                                                         ],
+                                                                       ),
+                                                                     ),
+                                                                   ),
+                                                                 ),
+
+                                                                 // 2. Left Trim Handle ONLY
+                                                                 if (isSelected)
+                                                                   Positioned(
+                                                                     left: 0, top: 0, bottom: 0, width: 14,
+                                                                     child: GestureDetector(
+                                                                       behavior: HitTestBehavior.opaque,
+                                                                       onHorizontalDragStart: (_) {
+                                                                         _isUserScrolling = true;
+                                                                         notifier.pushHistory();
+                                                                       },
+                                                                       onHorizontalDragUpdate: (details) {
+                                                                         _handleTrimDrag(
+                                                                           details: details,
+                                                                           onTrimDelta: (delta) => notifier.trimMediaLayerStart(media.id, delta),
+                                                                         );
+                                                                       },
+                                                                       onHorizontalDragEnd: (_) {
+                                                                         _stopTrimAutoScroll();
+                                                                         _isUserScrolling = false;
+                                                                       },
+                                                                       onHorizontalDragCancel: () {
+                                                                         _stopTrimAutoScroll();
+                                                                         _isUserScrolling = false;
+                                                                       },
+                                                                       child: Container(
+                                                                         decoration: const BoxDecoration(
+                                                                           color: Colors.white,
+                                                                           borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
+                                                                         ),
+                                                                         child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                       ),
+                                                                     ),
+                                                                   ),
+
+                                                                 // 3. Right Trim Handle ONLY
+                                                                 if (isSelected)
+                                                                   Positioned(
+                                                                     right: 0, top: 0, bottom: 0, width: 14,
+                                                                     child: GestureDetector(
+                                                                       behavior: HitTestBehavior.opaque,
+                                                                       onHorizontalDragStart: (_) {
+                                                                         _isUserScrolling = true;
+                                                                         notifier.pushHistory();
+                                                                       },
+                                                                       onHorizontalDragUpdate: (details) {
+                                                                         _handleTrimDrag(
+                                                                           details: details,
+                                                                           onTrimDelta: (delta) => notifier.trimMediaLayerEnd(media.id, delta),
+                                                                         );
+                                                                       },
+                                                                       onHorizontalDragEnd: (_) {
+                                                                         _stopTrimAutoScroll();
+                                                                         _isUserScrolling = false;
+                                                                       },
+                                                                       onHorizontalDragCancel: () {
+                                                                         _stopTrimAutoScroll();
+                                                                         _isUserScrolling = false;
+                                                                       },
+                                                                       child: Container(
+                                                                         decoration: const BoxDecoration(
+                                                                           color: Colors.white,
+                                                                           borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
+                                                                         ),
+                                                                         child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                       ),
+                                                                     ),
+                                                                   ),
+                                                               ],
+                                                             ),
+                                                           ),
+                                                         ),
+                                                       );
+                                                     }).toList(),
+                                                   ),
+                                                 ),
+
+                                              // 2. Main Media Tracks (Video & Images)
                                               Container(
                                                 margin: const EdgeInsets.symmetric(vertical: 2),
                                                 height: 26,
-                                                child: videoLayers.isNotEmpty ? Stack(
-                                                  children: videoLayers.map((media) {
-                                                      final isSelected = project.selectedLayerId == media.id;
-                                                      final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : 1.0;
-                                                      return Positioned(
-                                                        left: media.startTime * _timeScale,
-                                                        width: (media.mediaDuration > 0 ? media.mediaDuration : duration) * _timeScale,
-                                                        top: 0,
-                                                        bottom: 0,
-                                                        child: Opacity(
-                                                          opacity: opacity,
-                                                          child: GestureDetector(
-                                                            onTap: () => notifier.selectLayer(media.id),
-                                                            child: Container(
-                                                              decoration: BoxDecoration(
-                                                                color: isSelected ? const Color(0xFFFF512F) : const Color(0xFFEAB308),
-                                                                borderRadius: BorderRadius.circular(6),
-                                                                border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
-                                                              ),
-                                                              child: Stack(
-                                                                children: [
-                                                                  GestureDetector(
-                                                                    behavior: HitTestBehavior.opaque,
-                                                                    child: Container(
-                                                                      alignment: Alignment.center,
-                                                                      color: Colors.transparent,
-                                                                      child: Text(
-                                                                        media.type == MediaType.video ? 'Video' : 'Photo',
-                                                                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                                                                      ),
+                                                child: (mainMediaLayers.isNotEmpty) ? Stack(
+                                                  children: mainMediaLayers.map((media) {
+                                                    final isSelected = project.selectedLayerId == media.id;
+                                                    final isDragging = _draggingMediaId == media.id;
+                                                    final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : (isDragging ? 0.85 : 1.0);
+                                                    return Positioned(
+                                                      left: media.startTime * _timeScale,
+                                                      width: (media.mediaDuration > 0 ? media.mediaDuration : duration) * _timeScale,
+                                                      top: 0,
+                                                      bottom: 0,
+                                                      child: Opacity(
+                                                        opacity: opacity,
+                                                        child: Container(
+                                                          decoration: BoxDecoration(
+                                                            color: isSelected ? const Color(0xFFFF512F) : const Color(0xFFEAB308),
+                                                            borderRadius: BorderRadius.circular(6),
+                                                            border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
+                                                            boxShadow: isDragging
+                                                                ? [
+                                                                    BoxShadow(
+                                                                      color: const Color(0xFFFF512F).withOpacity(0.7),
+                                                                      blurRadius: 8,
+                                                                      spreadRadius: 1,
+                                                                    )
+                                                                  ]
+                                                                : null,
+                                                          ),
+                                                          child: Stack(
+                                                            children: [
+                                                              // 1. Middle Body (Long-Press to MOVE clip, Tap to select)
+                                                              Positioned(
+                                                                left: isSelected ? 14.0 : 0.0,
+                                                                right: isSelected ? 14.0 : 0.0,
+                                                                top: 0,
+                                                                bottom: 0,
+                                                                child: GestureDetector(
+                                                                  behavior: HitTestBehavior.opaque,
+                                                                  onTap: () => notifier.selectLayer(media.id),
+                                                                  onLongPressStart: (_) {
+                                                                    notifier.pushHistory();
+                                                                    setState(() {
+                                                                      _draggingMediaId = media.id;
+                                                                      _dragMediaInitialStart = media.startTime;
+                                                                    });
+                                                                  },
+                                                                  onLongPressMoveUpdate: (details) {
+                                                                    final deltaSeconds = details.localOffsetFromOrigin.dx / _timeScale;
+                                                                    final maxAllowedStart = (project.duration - media.mediaDuration).clamp(0.0, double.infinity);
+                                                                    final newStart = (_dragMediaInitialStart + deltaSeconds).clamp(0.0, maxAllowedStart);
+                                                                    notifier.updateMediaLayer(
+                                                                      media.copyWith(startTime: newStart),
+                                                                      recordHistory: false,
+                                                                    );
+                                                                  },
+                                                                  onLongPressEnd: (_) {
+                                                                    setState(() {
+                                                                      _draggingMediaId = null;
+                                                                    });
+                                                                  },
+                                                                  child: Container(
+                                                                    alignment: Alignment.center,
+                                                                    color: Colors.transparent,
+                                                                    child: Text(
+                                                                      media.type == MediaType.video ? 'Video' : 'Photo',
+                                                                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                                                                     ),
                                                                   ),
-                                                                  if (isSelected)
-                                                                    Positioned(
-                                                                      left: 0, top: 0, bottom: 0,
-                                                                      child: GestureDetector(
-                                                                        behavior: HitTestBehavior.opaque,
-                                                                        onHorizontalDragStart: (_) => notifier.pushHistory(),
-                                                                        onHorizontalDragUpdate: (details) {
-                                                                          final delta = details.delta.dx / _timeScale;
-                                                                          notifier.trimMediaLayerStart(media.id, delta);
-                                                                        },
-                                                                        child: Container(
-                                                                          width: 15,
-                                                                          decoration: const BoxDecoration(
-                                                                            color: Colors.white,
-                                                                            borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
-                                                                          ),
-                                                                          child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
-                                                                        ),
-                                                                      ),
-                                                                    ),
-                                                                  if (isSelected)
-                                                                    Positioned(
-                                                                      right: 0, top: 0, bottom: 0,
-                                                                      child: GestureDetector(
-                                                                        behavior: HitTestBehavior.opaque,
-                                                                        onHorizontalDragStart: (_) => notifier.pushHistory(),
-                                                                        onHorizontalDragUpdate: (details) {
-                                                                          final delta = details.delta.dx / _timeScale;
-                                                                          notifier.trimMediaLayerEnd(media.id, delta);
-                                                                        },
-                                                                        child: Container(
-                                                                          width: 15,
-                                                                          decoration: const BoxDecoration(
-                                                                            color: Colors.white,
-                                                                            borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
-                                                                          ),
-                                                                          child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
-                                                                        ),
-                                                                      ),
-                                                                    ),
-                                                                ],
+                                                                ),
                                                               ),
-                                                            ),
+
+                                                              // 2. Left Trim Handle ONLY
+                                                              if (isSelected)
+                                                                Positioned(
+                                                                  left: 0, top: 0, bottom: 0, width: 14,
+                                                                  child: GestureDetector(
+                                                                    behavior: HitTestBehavior.opaque,
+                                                                    onHorizontalDragStart: (_) {
+                                                                      _isUserScrolling = true;
+                                                                      notifier.pushHistory();
+                                                                    },
+                                                                    onHorizontalDragUpdate: (details) {
+                                                                      _handleTrimDrag(
+                                                                        details: details,
+                                                                        onTrimDelta: (delta) => notifier.trimMediaLayerStart(media.id, delta),
+                                                                      );
+                                                                    },
+                                                                    onHorizontalDragEnd: (_) {
+                                                                      _stopTrimAutoScroll();
+                                                                      _isUserScrolling = false;
+                                                                    },
+                                                                    onHorizontalDragCancel: () {
+                                                                      _stopTrimAutoScroll();
+                                                                      _isUserScrolling = false;
+                                                                    },
+                                                                    child: Container(
+                                                                      decoration: const BoxDecoration(
+                                                                        color: Colors.white,
+                                                                        borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
+                                                                      ),
+                                                                      child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                    ),
+                                                                  ),
+                                                                ),
+
+                                                              // 3. Right Trim Handle ONLY
+                                                              if (isSelected)
+                                                                Positioned(
+                                                                  right: 0, top: 0, bottom: 0, width: 14,
+                                                                  child: GestureDetector(
+                                                                    behavior: HitTestBehavior.opaque,
+                                                                    onHorizontalDragStart: (_) {
+                                                                      _isUserScrolling = true;
+                                                                      notifier.pushHistory();
+                                                                    },
+                                                                    onHorizontalDragUpdate: (details) {
+                                                                      _handleTrimDrag(
+                                                                        details: details,
+                                                                        onTrimDelta: (delta) => notifier.trimMediaLayerEnd(media.id, delta),
+                                                                      );
+                                                                    },
+                                                                    onHorizontalDragEnd: (_) {
+                                                                      _stopTrimAutoScroll();
+                                                                      _isUserScrolling = false;
+                                                                    },
+                                                                    onHorizontalDragCancel: () {
+                                                                      _stopTrimAutoScroll();
+                                                                      _isUserScrolling = false;
+                                                                    },
+                                                                    child: Container(
+                                                                      decoration: const BoxDecoration(
+                                                                        color: Colors.white,
+                                                                        borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
+                                                                      ),
+                                                                      child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                            ],
                                                           ),
                                                         ),
-                                                      );
-                                                    }).toList(),
+                                                      ),
+                                                    );
+                                                  }).toList(),
                                                 ) : const SizedBox(),
                                               ),
 
                                               // Audio Tracks (One row per layer)
                                               ...audioLayers.map((audio) {
                                                 final isSelected = project.selectedLayerId == audio.id;
-                                                final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : 1.0;
+                                                final isDragging = _draggingMediaId == audio.id;
+                                                final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : (isDragging ? 0.85 : 1.0);
                                                 return Container(
                                                   margin: const EdgeInsets.symmetric(vertical: 2),
                                                   height: 22,
@@ -318,66 +619,129 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                         bottom: 0,
                                                         child: Opacity(
                                                           opacity: opacity,
-                                                          child: GestureDetector(
-                                                            onTap: () => notifier.selectLayer(audio.id),
-                                                            child: Container(
-                                                              decoration: BoxDecoration(
-                                                                color: isSelected ? AppTheme.primaryAccent : Colors.teal.shade700,
-                                                                borderRadius: BorderRadius.circular(6),
-                                                                border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
-                                                              ),
-                                                              child: Stack(
-                                                                children: [
-                                                                  GestureDetector(
+                                                          child: Container(
+                                                            decoration: BoxDecoration(
+                                                              color: isSelected ? AppTheme.primaryAccent : Colors.teal.shade700,
+                                                              borderRadius: BorderRadius.circular(6),
+                                                              border: isSelected ? Border.all(color: Colors.white, width: 1.5) : null,
+                                                              boxShadow: isDragging
+                                                                  ? [
+                                                                      BoxShadow(
+                                                                        color: AppTheme.primaryAccent.withOpacity(0.7),
+                                                                        blurRadius: 8,
+                                                                        spreadRadius: 1,
+                                                                      )
+                                                                    ]
+                                                                  : null,
+                                                            ),
+                                                            child: Stack(
+                                                              children: [
+                                                                // 1. Middle Body (Long-Press to MOVE audio, Tap to select)
+                                                                Positioned(
+                                                                  left: isSelected ? 14.0 : 0.0,
+                                                                  right: isSelected ? 14.0 : 0.0,
+                                                                  top: 0,
+                                                                  bottom: 0,
+                                                                  child: GestureDetector(
                                                                     behavior: HitTestBehavior.opaque,
+                                                                    onTap: () => notifier.selectLayer(audio.id),
+                                                                    onLongPressStart: (_) {
+                                                                      notifier.pushHistory();
+                                                                      setState(() {
+                                                                        _draggingMediaId = audio.id;
+                                                                        _dragMediaInitialStart = audio.startTime;
+                                                                      });
+                                                                    },
+                                                                    onLongPressMoveUpdate: (details) {
+                                                                      final deltaSeconds = details.localOffsetFromOrigin.dx / _timeScale;
+                                                                      final maxAllowedStart = (project.duration - audio.mediaDuration).clamp(0.0, double.infinity);
+                                                                      final newStart = (_dragMediaInitialStart + deltaSeconds).clamp(0.0, maxAllowedStart);
+                                                                      notifier.updateMediaLayer(
+                                                                        audio.copyWith(startTime: newStart),
+                                                                        recordHistory: false,
+                                                                      );
+                                                                    },
+                                                                    onLongPressEnd: (_) {
+                                                                      setState(() {
+                                                                        _draggingMediaId = null;
+                                                                      });
+                                                                    },
                                                                     child: Container(
                                                                       alignment: Alignment.center,
                                                                       color: Colors.transparent,
                                                                       child: const Text('Audio Track', style: TextStyle(color: Colors.white, fontSize: 10)),
                                                                     ),
                                                                   ),
-                                                                  if (isSelected)
-                                                                    Positioned(
-                                                                      left: 0, top: 0, bottom: 0,
-                                                                      child: GestureDetector(
-                                                                        behavior: HitTestBehavior.opaque,
-                                                                        onHorizontalDragStart: (_) => notifier.pushHistory(),
-                                                                        onHorizontalDragUpdate: (details) {
-                                                                          final delta = details.delta.dx / _timeScale;
-                                                                          notifier.trimMediaLayerStart(audio.id, delta);
-                                                                        },
-                                                                        child: Container(
-                                                                          width: 15,
-                                                                          decoration: const BoxDecoration(
-                                                                            color: Colors.white,
-                                                                            borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
-                                                                          ),
-                                                                          child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                ),
+
+                                                                // 2. Left Trim Handle ONLY
+                                                                if (isSelected)
+                                                                  Positioned(
+                                                                    left: 0, top: 0, bottom: 0, width: 14,
+                                                                    child: GestureDetector(
+                                                                      behavior: HitTestBehavior.opaque,
+                                                                      onHorizontalDragStart: (_) {
+                                                                        _isUserScrolling = true;
+                                                                        notifier.pushHistory();
+                                                                      },
+                                                                      onHorizontalDragUpdate: (details) {
+                                                                        _handleTrimDrag(
+                                                                          details: details,
+                                                                          onTrimDelta: (delta) => notifier.trimMediaLayerStart(audio.id, delta),
+                                                                        );
+                                                                      },
+                                                                      onHorizontalDragEnd: (_) {
+                                                                        _stopTrimAutoScroll();
+                                                                        _isUserScrolling = false;
+                                                                      },
+                                                                      onHorizontalDragCancel: () {
+                                                                        _stopTrimAutoScroll();
+                                                                        _isUserScrolling = false;
+                                                                      },
+                                                                      child: Container(
+                                                                        decoration: const BoxDecoration(
+                                                                          color: Colors.white,
+                                                                          borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
                                                                         ),
+                                                                        child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
                                                                       ),
                                                                     ),
-                                                                  if (isSelected)
-                                                                    Positioned(
-                                                                      right: 0, top: 0, bottom: 0,
-                                                                      child: GestureDetector(
-                                                                        behavior: HitTestBehavior.opaque,
-                                                                        onHorizontalDragStart: (_) => notifier.pushHistory(),
-                                                                        onHorizontalDragUpdate: (details) {
-                                                                          final delta = details.delta.dx / _timeScale;
-                                                                          notifier.trimMediaLayerEnd(audio.id, delta);
-                                                                        },
-                                                                        child: Container(
-                                                                          width: 15,
-                                                                          decoration: const BoxDecoration(
-                                                                            color: Colors.white,
-                                                                            borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
-                                                                          ),
-                                                                          child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
+                                                                  ),
+
+                                                                // 3. Right Trim Handle ONLY
+                                                                if (isSelected)
+                                                                  Positioned(
+                                                                    right: 0, top: 0, bottom: 0, width: 14,
+                                                                    child: GestureDetector(
+                                                                      behavior: HitTestBehavior.opaque,
+                                                                      onHorizontalDragStart: (_) {
+                                                                        _isUserScrolling = true;
+                                                                        notifier.pushHistory();
+                                                                      },
+                                                                      onHorizontalDragUpdate: (details) {
+                                                                        _handleTrimDrag(
+                                                                          details: details,
+                                                                          onTrimDelta: (delta) => notifier.trimMediaLayerEnd(audio.id, delta),
+                                                                        );
+                                                                      },
+                                                                      onHorizontalDragEnd: (_) {
+                                                                        _stopTrimAutoScroll();
+                                                                        _isUserScrolling = false;
+                                                                      },
+                                                                      onHorizontalDragCancel: () {
+                                                                        _stopTrimAutoScroll();
+                                                                        _isUserScrolling = false;
+                                                                      },
+                                                                      child: Container(
+                                                                        decoration: const BoxDecoration(
+                                                                          color: Colors.white,
+                                                                          borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
                                                                         ),
+                                                                        child: const Center(child: Icon(Icons.drag_indicator_rounded, size: 10, color: Colors.black45)),
                                                                       ),
                                                                     ),
-                                                                ],
-                                                              ),
+                                                                  ),
+                                                              ],
                                                             ),
                                                           ),
                                                         ),
@@ -416,26 +780,72 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                               physics: const NeverScrollableScrollPhysics(), // Synced with tracks
                               child: Column(
                                 children: [
-                                  // Always reserve space for video track header
+                                  // Dynamic Overlay header
+                                  if (overlayLayers.isNotEmpty)
+                                    Container(
+                                      height: 26,
+                                      margin: const EdgeInsets.symmetric(vertical: 2),
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTap: () {
+                                          if (overlayLayers.first.type == MediaType.video) {
+                                            notifier.updateMediaLayerProperties(
+                                              overlayLayers.first.id,
+                                              isMuted: !overlayLayers.first.isMuted,
+                                            );
+                                          }
+                                        },
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              overlayLayers.first.type == MediaType.sticker
+                                                  ? Icons.layers_outlined
+                                                  : (overlayLayers.first.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded),
+                                              color: (overlayLayers.first.type == MediaType.video && overlayLayers.first.isMuted)
+                                                  ? Colors.redAccent
+                                                  : const Color(0xFF00E5FF),
+                                              size: 14,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              overlayLayers.first.type == MediaType.sticker
+                                                  ? 'Overlay\nPhoto'
+                                                  : (overlayLayers.first.isMuted ? 'Muted' : 'Mute clip\naudio'),
+                                              style: const TextStyle(color: Colors.white54, fontSize: 8, height: 1.1),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+
+                                  // Main Media track header
                                   Container(
                                     height: 26,
                                     margin: const EdgeInsets.symmetric(vertical: 2),
-                                    child: videoLayers.isNotEmpty ? GestureDetector(
+                                    child: mainMediaLayers.isNotEmpty ? GestureDetector(
                                       behavior: HitTestBehavior.opaque,
                                       onTap: () {
-                                        notifier.updateMediaLayerProperties(videoLayers.first.id, isMuted: !videoLayers.first.isMuted);
+                                        if (mainMediaLayers.first.type == MediaType.video) {
+                                          notifier.updateMediaLayerProperties(mainMediaLayers.first.id, isMuted: !mainMediaLayers.first.isMuted);
+                                        }
                                       },
                                       child: Row(
                                         mainAxisAlignment: MainAxisAlignment.center,
                                         children: [
                                           Icon(
-                                            videoLayers.first.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                            color: videoLayers.first.isMuted ? Colors.redAccent : Colors.white54,
+                                            mainMediaLayers.first.type == MediaType.sticker
+                                                ? Icons.image_rounded
+                                                : (mainMediaLayers.first.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded),
+                                            color: (mainMediaLayers.first.type == MediaType.video && mainMediaLayers.first.isMuted) ? Colors.redAccent : Colors.white54,
                                             size: 14,
                                           ),
                                           const SizedBox(width: 4),
                                           Text(
-                                            videoLayers.first.isMuted ? 'Muted' : 'Mute clip\naudio',
+                                            mainMediaLayers.first.type == MediaType.sticker
+                                                ? 'Main\nPhoto'
+                                                : (mainMediaLayers.first.isMuted ? 'Muted' : 'Mute clip\naudio'),
                                             style: const TextStyle(color: Colors.white54, fontSize: 8, height: 1.1),
                                             textAlign: TextAlign.center,
                                           ),
@@ -583,6 +993,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
       final row = textRows[trackIndex];
 
       return Container(
+        key: ValueKey('text_track_row_$trackIndex'),
         margin: const EdgeInsets.symmetric(vertical: 2),
         height: 22,
         child: Stack(
@@ -597,7 +1008,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
             final maxEnd = index < row.length - 1 ? row[index + 1].startTime : project.duration;
 
             return Positioned(
-              key: ValueKey('text_track_${text.id}'),
+              key: ValueKey('text_track_${trackIndex}_${text.id}'),
               left: text.startTime * _timeScale,
               width: width,
               top: 0,
@@ -607,6 +1018,7 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                 child: Opacity(
                   opacity: isDragging ? 0.85 : ((!isSelected && project.isTrimMode) ? 0.3 : 1.0),
                   child: Container(
+                    key: ValueKey('text_box_inner_${text.id}'),
                     decoration: BoxDecoration(
                       color: isSelected ? const Color(0xFFFF512F) : const Color(0xFFEAB308),
                       borderRadius: BorderRadius.circular(6),
@@ -623,88 +1035,110 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                     ),
                     child: Stack(
                       children: [
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onLongPressStart: (_) {
-                            notifier.pushHistory();
-                            setState(() {
-                              _draggingTextId = text.id;
-                              _dragTextInitialStart = text.startTime;
-                              _dragTextInitialEnd = text.endTime;
-                              _dragTextInitialTrack = text.zIndex;
-                            });
-                          },
-                          onLongPressMoveUpdate: (details) {
-                            final deltaSeconds = details.localOffsetFromOrigin.dx / _timeScale;
-                            final deltaRows = (details.localOffsetFromOrigin.dy / 26.0).round();
+                        Positioned(
+                          left: isSelected ? 14.0 : 0.0,
+                          right: isSelected ? 14.0 : 0.0,
+                          top: 0,
+                          bottom: 0,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => notifier.selectLayer(text.id),
+                            onLongPressStart: (_) {
+                              notifier.pushHistory();
+                              setState(() {
+                                _draggingTextId = text.id;
+                                _dragTextInitialStart = text.startTime;
+                                _dragTextInitialEnd = text.endTime;
+                                _dragTextInitialTrack = text.zIndex;
+                              });
+                            },
+                            onLongPressMoveUpdate: (details) {
+                              final deltaSeconds = details.localOffsetFromOrigin.dx / _timeScale;
+                              final deltaRows = (details.localOffsetFromOrigin.dy / 26.0).round();
 
-                            int targetTrack = (_dragTextInitialTrack + deltaRows).clamp(0, 7);
+                              int targetTrack = (_dragTextInitialTrack + deltaRows).clamp(0, 7);
 
-                            // Find other stationary items on targetTrack
-                            final targetTrackOthers = project.textLayers
-                                .where((l) => l.id != text.id && l.zIndex == targetTrack)
-                                .toList()
-                              ..sort((a, b) => a.startTime.compareTo(b.startTime));
+                              // Find other stationary items on targetTrack
+                              final targetTrackOthers = project.textLayers
+                                  .where((l) => l.id != text.id && l.zIndex == targetTrack)
+                                  .toList()
+                                ..sort((a, b) => a.startTime.compareTo(b.startTime));
 
-                            final prev = targetTrackOthers.where((l) => l.endTime <= _dragTextInitialStart + 0.05).lastOrNull;
-                            final next = targetTrackOthers.where((l) => l.startTime >= _dragTextInitialEnd - 0.05).firstOrNull;
+                              final prev = targetTrackOthers.where((l) => l.endTime <= _dragTextInitialStart + 0.05).lastOrNull;
+                              final next = targetTrackOthers.where((l) => l.startTime >= _dragTextInitialEnd - 0.05).firstOrNull;
 
-                            final double trackMin = prev?.endTime ?? 0.0;
-                            final double trackMax = next?.startTime ?? project.duration;
+                              final double trackMin = prev?.endTime ?? 0.0;
+                              final double trackMax = next?.startTime ?? project.duration;
 
-                            final duration = _dragTextInitialEnd - _dragTextInitialStart;
-                            final maxAllowedStart = (trackMax - duration).clamp(trackMin, double.infinity);
-                            final desiredStart = _dragTextInitialStart + deltaSeconds;
+                              final duration = _dragTextInitialEnd - _dragTextInitialStart;
+                              final maxAllowedStart = (trackMax - duration).clamp(trackMin, double.infinity);
+                              final desiredStart = _dragTextInitialStart + deltaSeconds;
 
-                            final clampedStart = desiredStart.clamp(trackMin, maxAllowedStart);
-                            final clampedEnd = clampedStart + duration;
+                              final clampedStart = desiredStart.clamp(trackMin, maxAllowedStart);
+                              final clampedEnd = clampedStart + duration;
 
-                            // ONLY update the moving text layer! None of the other layers are touched.
-                            notifier.updateTextLayer(
-                              text.copyWith(
-                                startTime: clampedStart,
-                                endTime: clampedEnd,
-                                zIndex: targetTrack,
-                              ),
-                              recordHistory: false,
-                            );
-                          },
-                          onLongPressEnd: (_) {
-                            setState(() {
-                              _draggingTextId = null;
-                            });
-                          },
-                          onLongPressCancel: () {
-                            setState(() {
-                              _draggingTextId = null;
-                            });
-                          },
-                          child: Container(
-                            alignment: Alignment.center,
-                            color: Colors.transparent,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 10),
-                              child: Text(
-                                text.text,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                              // ONLY update the moving text layer! None of the other layers are touched.
+                              notifier.updateTextLayer(
+                                text.copyWith(
+                                  startTime: clampedStart,
+                                  endTime: clampedEnd,
+                                  zIndex: targetTrack,
+                                ),
+                                recordHistory: false,
+                              );
+                            },
+                            onLongPressEnd: (_) {
+                              setState(() {
+                                _draggingTextId = null;
+                              });
+                            },
+                            onLongPressCancel: () {
+                              setState(() {
+                                _draggingTextId = null;
+                              });
+                            },
+                            child: Container(
+                              alignment: Alignment.center,
+                              color: Colors.transparent,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                                child: Text(
+                                  text.text,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                ),
                               ),
                             ),
                           ),
                         ),
                         if (isSelected)
                           Positioned(
-                            left: 0, top: 0, bottom: 0,
+                            left: 0, top: 0, bottom: 0, width: 14,
                             child: GestureDetector(
                               behavior: HitTestBehavior.opaque,
-                              onHorizontalDragStart: (_) => notifier.pushHistory(),
+                              onHorizontalDragStart: (_) {
+                                _isUserScrolling = true;
+                                notifier.pushHistory();
+                              },
                               onHorizontalDragUpdate: (details) {
-                                final delta = details.delta.dx / _timeScale;
-                                final newStart = (text.startTime + delta).clamp(minStart, text.endTime - 0.5);
-                                notifier.trimTextLayerStart(text.id, newStart);
+                                _handleTrimDrag(
+                                  details: details,
+                                  onTrimDelta: (delta) {
+                                    final currentText = project.textLayers.firstWhere((t) => t.id == text.id, orElse: () => text);
+                                    final newStart = (currentText.startTime + delta).clamp(minStart, currentText.endTime - 0.5);
+                                    notifier.trimTextLayerStart(text.id, newStart);
+                                  },
+                                );
+                              },
+                              onHorizontalDragEnd: (_) {
+                                _stopTrimAutoScroll();
+                                _isUserScrolling = false;
+                              },
+                              onHorizontalDragCancel: () {
+                                _stopTrimAutoScroll();
+                                _isUserScrolling = false;
                               },
                               child: Container(
-                                width: 15,
                                 decoration: const BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
@@ -715,17 +1149,32 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                           ),
                         if (isSelected)
                           Positioned(
-                            right: 0, top: 0, bottom: 0,
+                            right: 0, top: 0, bottom: 0, width: 14,
                             child: GestureDetector(
                               behavior: HitTestBehavior.opaque,
-                              onHorizontalDragStart: (_) => notifier.pushHistory(),
+                              onHorizontalDragStart: (_) {
+                                _isUserScrolling = true;
+                                notifier.pushHistory();
+                              },
                               onHorizontalDragUpdate: (details) {
-                                final delta = details.delta.dx / _timeScale;
-                                final newEnd = (text.endTime + delta).clamp(text.startTime + 0.5, maxEnd);
-                                notifier.trimTextLayerEnd(text.id, newEnd);
+                                _handleTrimDrag(
+                                  details: details,
+                                  onTrimDelta: (delta) {
+                                    final currentText = project.textLayers.firstWhere((t) => t.id == text.id, orElse: () => text);
+                                    final newEnd = (currentText.endTime + delta).clamp(currentText.startTime + 0.5, maxEnd);
+                                    notifier.trimTextLayerEnd(text.id, newEnd);
+                                  },
+                                );
+                              },
+                              onHorizontalDragEnd: (_) {
+                                _stopTrimAutoScroll();
+                                _isUserScrolling = false;
+                              },
+                              onHorizontalDragCancel: () {
+                                _stopTrimAutoScroll();
+                                _isUserScrolling = false;
                               },
                               child: Container(
-                                width: 15,
                                 decoration: const BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),

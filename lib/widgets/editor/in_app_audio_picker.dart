@@ -5,12 +5,12 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../theme/app_theme.dart';
 
 class InAppAudioPicker extends StatefulWidget {
-  final Function(String path) onAudioPicked;
+  final Function(String path, double duration) onAudioPicked;
 
-  const InAppAudioPicker({Key? key, required this.onAudioPicked}) : super(key: key);
+  const InAppAudioPicker({super.key, required this.onAudioPicked});
 
   @override
-  _InAppAudioPickerState createState() => _InAppAudioPickerState();
+  State<InAppAudioPicker> createState() => _InAppAudioPickerState();
 }
 
 class _InAppAudioPickerState extends State<InAppAudioPicker> {
@@ -18,6 +18,12 @@ class _InAppAudioPickerState extends State<InAppAudioPicker> {
   bool _hasPermission = false;
   bool _isLoading = true;
   List<SongModel> _songs = [];
+
+  String _formatDuration(double seconds) {
+    final mins = (seconds ~/ 60).toString().padLeft(2, '0');
+    final secs = (seconds.toInt() % 60).toString().padLeft(2, '0');
+    return '$mins:$secs';
+  }
 
   @override
   void initState() {
@@ -159,6 +165,10 @@ class _InAppAudioPickerState extends State<InAppAudioPicker> {
       padding: const EdgeInsets.only(bottom: 20),
       itemBuilder: (context, index) {
         final song = _songs[index];
+        final double durSec = (song.duration != null && song.duration! > 0)
+            ? (song.duration! / 1000.0)
+            : 15.0;
+
         return ListTile(
           leading: const CircleAvatar(
             backgroundColor: Colors.white10,
@@ -170,14 +180,27 @@ class _InAppAudioPickerState extends State<InAppAudioPicker> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          subtitle: Text(
-            song.artist ?? 'Unknown Artist',
-            style: const TextStyle(color: Colors.white54, fontSize: 12),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          subtitle: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  song.artist ?? 'Unknown Artist',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (song.duration != null && song.duration! > 0) ...[
+                const SizedBox(width: 8),
+                Text(
+                  _formatDuration(durSec),
+                  style: const TextStyle(color: AppTheme.primaryAccent, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ],
           ),
           onTap: () {
-            widget.onAudioPicked(song.data);
+            widget.onAudioPicked(song.data, durSec);
           },
         );
       },

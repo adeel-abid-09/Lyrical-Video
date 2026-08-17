@@ -1,9 +1,12 @@
+import 'dart:io';
 import 'dart:math';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
+import 'package:video_player/video_player.dart';
 
 import 'in_app_audio_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -19,6 +22,7 @@ import 'text_bubble_painter.dart';
 import 'text_animation_preview_tile.dart';
 import 'text_template_preview_tile.dart';
 import 'text_effect_preview_tile.dart';
+import 'crop_media_dialog.dart';
 import 'custom_hsv_color_picker.dart';
 
 enum ToolbarCategory {
@@ -38,6 +42,8 @@ enum ToolbarCategory {
   textBubbles,
   audio,
   video,
+  media,
+  overlay,
   stickers,
   ratio,
 }
@@ -125,13 +131,162 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     Colors.black,
   ];
 
+  void _showMediaPickerSheet({bool replace = false, bool isOverlay = false}) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF181826),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final title = replace ? 'Replace Media' : (isOverlay ? 'Add Overlay' : 'Add Media');
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _pickVideo(replace: replace, isOverlay: isOverlay);
+                        },
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF2E3192), Color(0xFF1BFFFF)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF1BFFFF).withOpacity(0.2),
+                                blurRadius: 8,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            children: const [
+                              Icon(Icons.videocam_rounded, color: Colors.white, size: 30),
+                              SizedBox(height: 8),
+                              Text(
+                                'Video',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _pickImage(replace: replace, isOverlay: isOverlay);
+                        },
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFFD4145A), Color(0xFFFBB03B)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFFFBB03B).withOpacity(0.2),
+                                blurRadius: 8,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            children: const [
+                              Icon(Icons.photo_library_rounded, color: Colors.white, size: 30),
+                              SizedBox(height: 8),
+                              Text(
+                                'Image',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _pickVideo({bool replace = false, bool isOverlay = false}) async {
     final XFile? file = await _picker.pickVideo(source: ImageSource.gallery);
     if (file != null) {
+      double duration = 15.0;
+      try {
+        VideoPlayerController controller;
+        if (kIsWeb || file.path.startsWith('blob:') || file.path.startsWith('http')) {
+          controller = VideoPlayerController.networkUrl(Uri.parse(file.path));
+        } else {
+          controller = VideoPlayerController.file(File(file.path));
+        }
+        await controller.initialize();
+        if (controller.value.duration.inMilliseconds > 0) {
+          duration = controller.value.duration.inMilliseconds / 1000.0;
+        }
+        await controller.dispose();
+      } catch (_) {}
+
       final project = ref.read(editorProjectProvider);
 
       if (replace && project.selectedLayerId != null) {
-        ref.read(editorProjectProvider.notifier).replaceMediaLayerPath(project.selectedLayerId!, file.path, 15.0);
+        ref.read(editorProjectProvider.notifier).replaceMediaLayerPath(
+          project.selectedLayerId!, 
+          file.path, 
+          duration,
+          newType: MediaType.video,
+        );
         return;
       }
 
@@ -139,10 +294,44 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         id: const Uuid().v4(),
         path: file.path,
         type: MediaType.video,
-        mediaDuration: 15.0,
-        startTime: isOverlay ? project.currentPlayheadTime : (project.mediaLayers.isEmpty ? 0.0 : project.duration),
+        mediaDuration: duration,
+        originalDuration: duration,
+        startTime: isOverlay ? project.currentPlayheadTime : (project.mediaLayers.where((m) => !m.isOverlay && (m.type == MediaType.video || m.type == MediaType.sticker)).isEmpty ? 0.0 : project.duration),
         scaleX: isOverlay ? 0.4 : 1.0,
-        position: isOverlay ? const Offset(0.7, 0.7) : const Offset(0.5, 0.5),
+        scaleY: isOverlay ? 0.4 : 1.0,
+        position: isOverlay ? const Offset(0.5, 0.5) : const Offset(0.5, 0.5),
+        isOverlay: isOverlay,
+      );
+      ref.read(editorProjectProvider.notifier).addMediaLayer(media);
+    }
+  }
+
+  Future<void> _pickImage({bool replace = false, bool isOverlay = false}) async {
+    final XFile? file = await _picker.pickImage(source: ImageSource.gallery);
+    if (file != null) {
+      final project = ref.read(editorProjectProvider);
+
+      if (replace && project.selectedLayerId != null) {
+        ref.read(editorProjectProvider.notifier).replaceMediaLayerPath(
+          project.selectedLayerId!, 
+          file.path, 
+          5.0,
+          newType: MediaType.sticker,
+        );
+        return;
+      }
+
+      final media = MediaLayerModel(
+        id: const Uuid().v4(),
+        path: file.path,
+        type: MediaType.sticker,
+        mediaDuration: 5.0,
+        originalDuration: 5.0,
+        startTime: isOverlay ? project.currentPlayheadTime : (project.mediaLayers.where((m) => !m.isOverlay && (m.type == MediaType.video || m.type == MediaType.sticker)).isEmpty ? 0.0 : project.duration),
+        scaleX: isOverlay ? 0.4 : 1.0,
+        scaleY: isOverlay ? 0.4 : 1.0,
+        position: isOverlay ? const Offset(0.5, 0.5) : const Offset(0.5, 0.5),
+        isOverlay: isOverlay,
       );
       ref.read(editorProjectProvider.notifier).addMediaLayer(media);
     }
@@ -157,12 +346,14 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         return FractionallySizedBox(
           heightFactor: 0.7,
           child: InAppAudioPicker(
-            onAudioPicked: (path) {
+            onAudioPicked: (path, duration) {
               Navigator.pop(context); // Close the bottom sheet
               final project = ref.read(editorProjectProvider);
 
+              final effectiveDuration = duration > 0 ? duration : 15.0;
+
               if (replace && project.selectedLayerId != null) {
-                ref.read(editorProjectProvider.notifier).replaceMediaLayerPath(project.selectedLayerId!, path, 15.0);
+                ref.read(editorProjectProvider.notifier).replaceMediaLayerPath(project.selectedLayerId!, path, effectiveDuration);
                 return;
               }
 
@@ -171,7 +362,8 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                 path: path,
                 type: MediaType.audio,
                 startTime: project.currentPlayheadTime,
-                mediaDuration: 15.0,
+                mediaDuration: effectiveDuration,
+                originalDuration: effectiveDuration,
               );
               ref.read(editorProjectProvider.notifier).addMediaLayer(media);
             },
@@ -342,6 +534,28 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         );
       },
     );
+  }
+
+  Future<void> _openCropDialog() async {
+    final project = ref.read(editorProjectProvider);
+    if (project.selectedLayerId == null) return;
+    final layer = project.mediaLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+    if (layer == null) return;
+
+    final result = await CropMediaDialog.show(
+      context,
+      layer,
+      currentPlayheadTime: project.currentPlayheadTime,
+    );
+    if (result != null) {
+      ref.read(editorProjectProvider.notifier).updateMediaLayerCrop(
+        layer.id,
+        cropLeft: result.cropLeft,
+        cropTop: result.cropTop,
+        cropRight: result.cropRight,
+        cropBottom: result.cropBottom,
+      );
+    }
   }
 
   Future<void> _executeAutoLyricsGenerate() async {
@@ -609,8 +823,13 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           } else {
             final media = next.mediaLayers.where((m) => m.id == next.selectedLayerId).firstOrNull;
             if (media != null) {
-              if (media.type == MediaType.video) setState(() => _activeCategory = ToolbarCategory.video);
-              if (media.type == MediaType.audio) setState(() => _activeCategory = ToolbarCategory.audio);
+              if (media.isOverlay) {
+                setState(() => _activeCategory = ToolbarCategory.overlay);
+              } else if (media.type == MediaType.audio) {
+                setState(() => _activeCategory = ToolbarCategory.audio);
+              } else {
+                setState(() => _activeCategory = ToolbarCategory.media);
+              }
             }
           }
         }
@@ -700,8 +919,21 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             highlight: _isAutoLyricsLoading,
             activeColor: const Color(0xFFFF9800),
           ),
-          _buildItem(Icons.video_library_rounded, 'Video', () {
-            setState(() => _activeCategory = ToolbarCategory.video);
+          _buildItem(Icons.perm_media_rounded, 'Media', () {
+            final mainMedia = project.mediaLayers.where((m) => !m.isOverlay && (m.type == MediaType.video || m.type == MediaType.sticker)).firstOrNull;
+            if (mainMedia != null) {
+              ref.read(editorProjectProvider.notifier).selectLayer(mainMedia.id);
+            } else {
+              _showMediaPickerSheet(replace: false, isOverlay: false);
+            }
+          }),
+          _buildItem(Icons.layers_outlined, 'Overlay', () {
+            final overlayMedia = project.mediaLayers.where((m) => m.isOverlay).firstOrNull;
+            if (overlayMedia != null && project.selectedLayerId == null) {
+              ref.read(editorProjectProvider.notifier).selectLayer(overlayMedia.id);
+            } else {
+              _showMediaPickerSheet(replace: false, isOverlay: true);
+            }
           }),
           _buildItem(Icons.layers_rounded, 'Layers', widget.onOpenLayersPanel),
           _buildItem(Icons.aspect_ratio_rounded, 'Ratio', widget.onOpenRatioSelector),
@@ -1439,73 +1671,38 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         final project = ref.watch(editorProjectProvider);
         final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
 
-        final items = <Widget>[];
+        return TextAnimationRegistry.animations.map((def) {
+          final isSelected = (selectedText?.animation == def.type);
 
-        // Prominent CapCut-style Duration / Speed controller
-        if (selectedText != null && selectedText.animation != TextAnimationType.none) {
-          items.add(
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: InkWell(
-                onTap: () {
-                  _showSliderBottomSheet(
-                    title: 'Animation Duration',
-                    initialValue: selectedText.animationDuration,
-                    min: 0.2,
-                    max: 5.0,
-                    unit: 's',
-                    isInteger: false,
-                    onChanged: (val) {
-                      ref.read(editorProjectProvider.notifier).updateTextLayer(
-                        selectedText.copyWith(animationDuration: val),
-                      );
-                    },
-                  );
-                },
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryAccent.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppTheme.primaryAccent, width: 1.2),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.timer_outlined, color: AppTheme.primaryAccent, size: 16),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${selectedText.animationDuration.toStringAsFixed(1)}s',
-                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          return TextAnimationPreviewTile(
+            def: def,
+            isSelected: isSelected,
+            onTap: () {
+              if (selectedText != null) {
+                ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  selectedText.copyWith(animation: def.type),
+                );
+              }
+            },
+            onAdjustTap: () {
+              if (selectedText != null) {
+                _showSliderBottomSheet(
+                  title: '${def.name} Duration',
+                  initialValue: selectedText.animationDuration,
+                  min: 0.2,
+                  max: 5.0,
+                  unit: 's',
+                  isInteger: false,
+                  onChanged: (val) {
+                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                      selectedText.copyWith(animationDuration: val),
+                    );
+                  },
+                );
+              }
+            },
           );
-        }
-
-        items.addAll(
-          TextAnimationRegistry.animations.map((def) {
-            final isSelected = (selectedText?.animation == def.type);
-
-            return TextAnimationPreviewTile(
-              def: def,
-              isSelected: isSelected,
-              onTap: () {
-                if (selectedText != null) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
-                    selectedText.copyWith(animation: def.type),
-                  );
-                }
-              },
-            );
-          }),
-        );
-
-        return items;
+        }).toList();
 
       case ToolbarCategory.textBubbles:
         final project = ref.watch(editorProjectProvider);
@@ -1545,53 +1742,144 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           );
         }).toList();
 
+      case ToolbarCategory.media:
       case ToolbarCategory.video:
+        final selectedLayer = project.mediaLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+        final isVideo = selectedLayer?.type == MediaType.video;
+
         return [
-          _buildItem(Icons.add_to_photos_rounded, 'Add Video', () => _pickVideo(replace: false)),
+          _buildItem(Icons.add_to_photos_rounded, 'Add Media', () => _showMediaPickerSheet(replace: false, isOverlay: false)),
+          _buildItem(Icons.crop_rounded, 'Crop', _openCropDialog),
           _buildItem(Icons.settings_overscan_rounded, 'Trim', () {
             ref.read(editorProjectProvider.notifier).setTrimMode(true);
           }),
-          _buildItem(
-            _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
-            'Auto Lyrics',
-            _runAutoLyrics,
-            highlight: _isAutoLyricsLoading,
-            activeColor: const Color(0xFFFF9800),
-          ),
+          if (isVideo)
+            _buildItem(
+              _isAutoLyricsLoading ? Icons.hourglass_top_rounded : Icons.auto_awesome_rounded,
+              'Auto Lyrics',
+              _runAutoLyrics,
+              highlight: _isAutoLyricsLoading,
+              activeColor: const Color(0xFFFF9800),
+            ),
           _buildItem(Icons.content_cut_rounded, 'Split', () {
             final project = ref.read(editorProjectProvider);
             if (project.selectedLayerId != null) {
               ref.read(editorProjectProvider.notifier).splitMediaLayer(project.selectedLayerId!, project.currentPlayheadTime);
             }
           }),
-          _buildItem(Icons.picture_in_picture_rounded, 'Overlay', () => _pickVideo(isOverlay: true)),
-          _buildItem(Icons.library_music_rounded, 'Extract Audio', _extractAudio),
-          _buildItem(
-            Icons.volume_up_rounded,
-            'Volume',
-            () {
-              final project = ref.read(editorProjectProvider);
-              if (project.selectedLayerId == null) return;
-              final layer = project.mediaLayers.firstWhere((l) => l.id == project.selectedLayerId);
-              
-              _showSliderBottomSheet(
-                title: 'Volume',
-                initialValue: layer.volume,
-                min: 0.0,
-                max: 1.0,
-                unit: '%',
-                isInteger: false,
-                onChanged: (val) {
-                  ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(
-                    layer.id, 
-                    volume: val,
-                    isMuted: val == 0.0,
-                  );
-                },
-              );
-            },
-          ),
-          _buildItem(Icons.change_circle_outlined, 'Change', () => _pickVideo(replace: true)),
+          _buildItem(Icons.layers_outlined, 'Overlay', () => _showMediaPickerSheet(isOverlay: true, replace: false)),
+          if (isVideo)
+            _buildItem(Icons.library_music_rounded, 'Extract Audio', _extractAudio),
+          if (isVideo)
+            _buildItem(
+              selectedLayer?.isMuted == true ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+              selectedLayer?.isMuted == true ? 'Unmute' : 'Mute',
+              () {
+                if (selectedLayer != null) {
+                  ref.read(editorProjectProvider.notifier).toggleMuteMediaLayer(selectedLayer.id);
+                }
+              },
+              highlight: selectedLayer?.isMuted == true,
+              activeColor: Colors.redAccent,
+            ),
+          if (isVideo)
+            _buildItem(
+              Icons.tune_rounded,
+              'Volume',
+              () {
+                final project = ref.read(editorProjectProvider);
+                if (project.selectedLayerId == null) return;
+                final layer = project.mediaLayers.firstWhere((l) => l.id == project.selectedLayerId);
+                
+                _showSliderBottomSheet(
+                  title: 'Volume',
+                  initialValue: layer.volume,
+                  min: 0.0,
+                  max: 1.0,
+                  unit: '%',
+                  isInteger: false,
+                  onChanged: (val) {
+                    ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(
+                      layer.id, 
+                      volume: val,
+                      isMuted: val == 0.0,
+                    );
+                  },
+                );
+              },
+            ),
+          _buildItem(Icons.change_circle_outlined, 'Replace', () => _showMediaPickerSheet(replace: true, isOverlay: false)),
+          _buildItem(Icons.delete_outline_rounded, 'Delete', () {
+            final project = ref.read(editorProjectProvider);
+            if (project.selectedLayerId != null) {
+              ref.read(editorProjectProvider.notifier).deleteMediaLayer(project.selectedLayerId!);
+            }
+          }),
+        ];
+
+      case ToolbarCategory.overlay:
+        final selectedLayer = project.mediaLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+        final isVideo = selectedLayer?.type == MediaType.video;
+
+        return [
+          _buildItem(Icons.add_to_photos_rounded, 'Add Overlay', () => _showMediaPickerSheet(replace: false, isOverlay: true)),
+          _buildItem(Icons.crop_rounded, 'Crop', _openCropDialog),
+          if (selectedLayer?.isCropped == true)
+            _buildItem(Icons.crop_free_rounded, 'Reset Crop', () {
+              if (selectedLayer != null) {
+                ref.read(editorProjectProvider.notifier).resetMediaLayerCrop(selectedLayer.id);
+              }
+            }),
+          _buildItem(Icons.settings_overscan_rounded, 'Trim', () {
+            ref.read(editorProjectProvider.notifier).setTrimMode(true);
+          }),
+          _buildItem(Icons.content_cut_rounded, 'Split', () {
+            final project = ref.read(editorProjectProvider);
+            if (project.selectedLayerId != null) {
+              ref.read(editorProjectProvider.notifier).splitMediaLayer(project.selectedLayerId!, project.currentPlayheadTime);
+            }
+          }),
+          if (isVideo)
+            _buildItem(Icons.library_music_rounded, 'Extract Audio', _extractAudio),
+          if (isVideo)
+            _buildItem(
+              selectedLayer?.isMuted == true ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+              selectedLayer?.isMuted == true ? 'Unmute' : 'Mute',
+              () {
+                if (selectedLayer != null) {
+                  ref.read(editorProjectProvider.notifier).toggleMuteMediaLayer(selectedLayer.id);
+                }
+              },
+              highlight: selectedLayer?.isMuted == true,
+              activeColor: Colors.redAccent,
+            ),
+          if (isVideo)
+            _buildItem(
+              Icons.tune_rounded,
+              'Volume',
+              () {
+                final project = ref.read(editorProjectProvider);
+                if (project.selectedLayerId == null) return;
+                final layer = project.mediaLayers.firstWhere((l) => l.id == project.selectedLayerId);
+                
+                _showSliderBottomSheet(
+                  title: 'Volume',
+                  initialValue: layer.volume,
+                  min: 0.0,
+                  max: 1.0,
+                  unit: '%',
+                  isInteger: false,
+                  onChanged: (val) {
+                    ref.read(editorProjectProvider.notifier).updateMediaLayerProperties(
+                      layer.id, 
+                      volume: val,
+                      isMuted: val == 0.0,
+                    );
+                  },
+                );
+              },
+            ),
+          _buildItem(Icons.change_circle_outlined, 'Replace', () => _showMediaPickerSheet(replace: true, isOverlay: true)),
           _buildItem(Icons.delete_outline_rounded, 'Delete', () {
             final project = ref.read(editorProjectProvider);
             if (project.selectedLayerId != null) {
@@ -1601,6 +1889,8 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         ];
 
       case ToolbarCategory.audio:
+        final selectedLayer = project.mediaLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+
         return [
           _buildItem(Icons.audio_file_rounded, 'Add Audio', () => _pickAudio(replace: false)),
           _buildItem(Icons.settings_overscan_rounded, 'Trim', () {
@@ -1620,7 +1910,18 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             }
           }),
           _buildItem(
-            Icons.volume_up_rounded,
+            selectedLayer?.isMuted == true ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+            selectedLayer?.isMuted == true ? 'Unmute' : 'Mute',
+            () {
+              if (selectedLayer != null) {
+                ref.read(editorProjectProvider.notifier).toggleMuteMediaLayer(selectedLayer.id);
+              }
+            },
+            highlight: selectedLayer?.isMuted == true,
+            activeColor: Colors.redAccent,
+          ),
+          _buildItem(
+            Icons.tune_rounded,
             'Volume',
             () {
               final project = ref.read(editorProjectProvider);

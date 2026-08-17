@@ -86,28 +86,47 @@ class LayersPanelWidget extends ConsumerWidget {
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
+                                    // Visibility Toggle
                                     IconButton(
                                       icon: Icon(
                                         textLayer.isVisible ? Icons.visibility_rounded : Icons.visibility_off_rounded,
                                         color: textLayer.isVisible ? Colors.white70 : Colors.white24,
-                                        size: 20,
+                                        size: 18,
                                       ),
-                                      onPressed: () {
-                                        notifier.updateTextLayer(
-                                          textLayer.copyWith(isVisible: !textLayer.isVisible),
-                                        );
-                                      },
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                      tooltip: textLayer.isVisible ? 'Hide Layer' : 'Show Layer',
+                                      onPressed: () => notifier.toggleVisibilityTextLayer(textLayer.id),
                                     ),
+                                    // Lock Toggle
                                     IconButton(
-                                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                                      icon: Icon(
+                                        textLayer.isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                                        color: textLayer.isLocked ? Colors.amberAccent : Colors.white38,
+                                        size: 18,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                      tooltip: textLayer.isLocked ? 'Unlock Layer' : 'Lock Layer',
+                                      onPressed: () => notifier.toggleLockTextLayer(textLayer.id),
+                                    ),
+                                    // Delete
+                                    IconButton(
+                                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 18),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                      tooltip: 'Delete',
                                       onPressed: () => notifier.deleteTextLayer(textLayer.id),
                                     ),
-                                    const Icon(Icons.drag_handle_rounded, color: Colors.white38),
+                                    const SizedBox(width: 2),
+                                    const Icon(Icons.drag_handle_rounded, color: Colors.white38, size: 20),
                                   ],
                                 ),
                                 onTap: () {
-                                  notifier.selectLayer(textLayer.id);
-                                  Navigator.pop(context);
+                                  if (!textLayer.isLocked) {
+                                    notifier.selectLayer(textLayer.id);
+                                    Navigator.pop(context);
+                                  }
                                 },
                               ),
                             );
@@ -127,7 +146,27 @@ class LayersPanelWidget extends ConsumerWidget {
                           },
                           children: project.mediaLayers.map((mediaLayer) {
                             final isSelected = project.selectedLayerId == mediaLayer.id;
-                            final isAudio = mediaLayer.type == MediaType.audio;
+                            
+                            IconData layerIcon;
+                            Color iconColor;
+                            String layerCategory;
+
+                            if (mediaLayer.type == MediaType.audio) {
+                              layerIcon = Icons.audiotrack_rounded;
+                              iconColor = Colors.greenAccent;
+                              layerCategory = 'Audio';
+                            } else if (mediaLayer.isOverlay) {
+                              layerIcon = mediaLayer.type == MediaType.video ? Icons.picture_in_picture_rounded : Icons.layers_rounded;
+                              iconColor = const Color(0xFFE040FB);
+                              layerCategory = mediaLayer.type == MediaType.video ? 'Overlay Video' : 'Overlay Image';
+                            } else {
+                              layerIcon = mediaLayer.type == MediaType.video ? Icons.video_collection_rounded : Icons.image_rounded;
+                              iconColor = mediaLayer.type == MediaType.video ? Colors.blueAccent : Colors.amberAccent;
+                              layerCategory = mediaLayer.type == MediaType.video ? 'Main Video' : 'Main Image';
+                            }
+
+                            final hasAudio = mediaLayer.type == MediaType.video || mediaLayer.type == MediaType.audio;
+
                             return Container(
                               key: ValueKey(mediaLayer.id),
                               margin: const EdgeInsets.symmetric(vertical: 4),
@@ -138,42 +177,76 @@ class LayersPanelWidget extends ConsumerWidget {
                               ),
                               child: ListTile(
                                 leading: Icon(
-                                  isAudio ? Icons.audiotrack_rounded : Icons.video_collection_rounded,
-                                  color: isAudio ? Colors.greenAccent : Colors.blueAccent,
+                                  layerIcon,
+                                  color: iconColor,
                                 ),
                                 title: Text(
-                                  mediaLayer.path.split('/').last,
+                                  mediaLayer.path.split('/').last.split('\\').last,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(color: Colors.white, fontSize: 14),
                                 ),
                                 subtitle: Text(
-                                  '${mediaLayer.startTime.toStringAsFixed(1)}s',
+                                  '$layerCategory • ${mediaLayer.startTime.toStringAsFixed(1)}s - ${(mediaLayer.startTime + mediaLayer.mediaDuration).toStringAsFixed(1)}s',
                                   style: const TextStyle(color: Colors.white38, fontSize: 11),
                                 ),
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
+                                    // Visibility Toggle
                                     IconButton(
                                       icon: Icon(
-                                        mediaLayer.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                        color: mediaLayer.isMuted ? Colors.redAccent : Colors.white70,
-                                        size: 20,
+                                        mediaLayer.isVisible ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+                                        color: mediaLayer.isVisible ? Colors.white70 : Colors.white24,
+                                        size: 18,
                                       ),
-                                      onPressed: () {
-                                        notifier.toggleMuteMediaLayer(mediaLayer.id);
-                                      },
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                      tooltip: mediaLayer.isVisible ? 'Hide Layer' : 'Show Layer',
+                                      onPressed: () => notifier.toggleVisibilityMediaLayer(mediaLayer.id),
                                     ),
+                                    // Mute Toggle (for video/audio)
+                                    if (hasAudio)
+                                      IconButton(
+                                        icon: Icon(
+                                          mediaLayer.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                          color: mediaLayer.isMuted ? Colors.redAccent : Colors.white70,
+                                          size: 18,
+                                        ),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                        tooltip: mediaLayer.isMuted ? 'Unmute' : 'Mute',
+                                        onPressed: () => notifier.toggleMuteMediaLayer(mediaLayer.id),
+                                      ),
+                                    // Lock Toggle
                                     IconButton(
-                                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                                      icon: Icon(
+                                        mediaLayer.isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                                        color: mediaLayer.isLocked ? Colors.amberAccent : Colors.white38,
+                                        size: 18,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                      tooltip: mediaLayer.isLocked ? 'Unlock Layer' : 'Lock Layer',
+                                      onPressed: () => notifier.toggleLockMediaLayer(mediaLayer.id),
+                                    ),
+                                    // Delete
+                                    IconButton(
+                                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 18),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                      tooltip: 'Delete',
                                       onPressed: () => notifier.deleteMediaLayer(mediaLayer.id),
                                     ),
-                                    const Icon(Icons.drag_handle_rounded, color: Colors.white38),
+                                    const SizedBox(width: 2),
+                                    const Icon(Icons.drag_handle_rounded, color: Colors.white38, size: 20),
                                   ],
                                 ),
                                 onTap: () {
-                                  notifier.selectLayer(mediaLayer.id);
-                                  Navigator.pop(context);
+                                  if (!mediaLayer.isLocked) {
+                                    notifier.selectLayer(mediaLayer.id);
+                                    Navigator.pop(context);
+                                  }
                                 },
                               ),
                             );

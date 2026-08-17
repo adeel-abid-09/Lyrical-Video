@@ -181,6 +181,7 @@ class TextLayerModel {
       'endTime': endTime,
       'zIndex': zIndex,
       'isVisible': isVisible,
+      'isLocked': isLocked,
       'animationDuration': animationDuration,
       'isAutoLyric': isAutoLyric,
     };
@@ -216,6 +217,7 @@ class TextLayerModel {
       endTime: (json['endTime'] as num? ?? 10.0).toDouble(),
       zIndex: json['zIndex'] as int? ?? 0,
       isVisible: json['isVisible'] as bool? ?? true,
+      isLocked: json['isLocked'] as bool? ?? false,
       animationDuration: (json['animationDuration'] as num?)?.toDouble() ?? 0.5,
       isAutoLyric: json['isAutoLyric'] as bool? ?? false,
     );

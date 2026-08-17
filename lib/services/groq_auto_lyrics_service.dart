@@ -86,10 +86,10 @@ class GroqAutoLyricsService {
         final tempDir = await getTemporaryDirectory();
         final tempPath = '${tempDir.path}/groq_audio_${const Uuid().v4()}.m4a';
         
-        final durationLimit = totalDuration > 0 ? totalDuration : 60.0;
+        // Extract full audio track without early seek truncation
         final ffmpegCmd = isVideo
-            ? '-y -ss 0 -t $durationLimit -i "$audioFilePath" -vn -sn -dn -c:a aac -b:a 32k -ar 16000 -ac 1 -threads 4 "$tempPath"'
-            : '-y -ss 0 -t $durationLimit -i "$audioFilePath" -c:a aac -b:a 32k -ar 16000 -ac 1 -threads 4 "$tempPath"';
+            ? '-y -i "$audioFilePath" -vn -sn -dn -c:a aac -b:a 64k -ar 16000 -ac 1 "$tempPath"'
+            : '-y -i "$audioFilePath" -c:a aac -b:a 64k -ar 16000 -ac 1 "$tempPath"';
             
         final session = await FFmpegKit.execute(ffmpegCmd);
         final returnCode = await session.getReturnCode();
@@ -118,13 +118,13 @@ class GroqAutoLyricsService {
           request.headers.addAll({
             'Authorization': 'Bearer $apiKey',
           });
-          // Use whisper-large-v3-turbo for blazing fast 1-second transcription
+          // Use whisper-large-v3-turbo on Groq for complete, fast and accurate transcription across entire audio
           request.fields['model'] = 'whisper-large-v3-turbo';
           request.fields['response_format'] = 'verbose_json';
           request.fields['timestamp_granularities[]'] = 'word';
           request.files.add(await http.MultipartFile.fromPath('file', finalUploadPath));
 
-          final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+          final streamedResponse = await request.send().timeout(const Duration(seconds: 45));
           final response = await http.Response.fromStream(streamedResponse);
 
           if (response.statusCode == 200) {
@@ -141,22 +141,44 @@ class GroqAutoLyricsService {
               
               for (int i = 0; i < wordsArray.length; i++) {
                 currentChunk.add(wordsArray[i]);
+                final currentWord = wordsArray[i]['word'].toString().trim();
+                final isPunctuationOrEnd = currentWord.endsWith('.') || 
+                                          currentWord.endsWith('!') || 
+                                          currentWord.endsWith('?') || 
+                                          currentWord.endsWith(',') || 
+                                          currentWord.endsWith('،') || 
+                                          currentWord.endsWith('۔');
                 
-                if (currentChunk.length >= 4 || i == wordsArray.length - 1) {
+                if (currentChunk.length >= 4 || isPunctuationOrEnd || i == wordsArray.length - 1) {
                   final chunkStart = (currentChunk.first['start'] as num? ?? 0.0).toDouble();
-                  final chunkEnd = (currentChunk.last['end'] as num? ?? chunkStart + 2.0).toDouble();
+                  final chunkEnd = (currentChunk.last['end'] as num? ?? chunkStart + 1.8).toDouble();
                   final originalText = currentChunk.map((w) => w['word'].toString().trim()).join(' ');
                   
                   if (originalText.isNotEmpty) {
+                    // Check next word start time so this lyric stays on screen seamlessly until next word begins!
+                    double effectiveEnd = chunkEnd;
+                    if (i < wordsArray.length - 1) {
+                      final nextWordStart = (wordsArray[i + 1]['start'] as num? ?? chunkEnd).toDouble();
+                      if (nextWordStart > chunkStart && nextWordStart <= chunkStart + 5.0) {
+                        effectiveEnd = nextWordStart;
+                      } else {
+                        effectiveEnd = chunkEnd + 0.4;
+                      }
+                    } else {
+                      effectiveEnd = chunkEnd + 0.5;
+                    }
+
+                    final bool isRtl = RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]').hasMatch(originalText);
                     lyricLayers.add(
                       TextLayerModel(
                         id: uuid.v4(),
                         text: originalText,
                         position: const Offset(0.5, 0.75),
-                        fontSize: 26.0,
+                        fontSize: isRtl ? 28.0 : 26.0,
                         textColor: const Color(0xFFFFFFFF),
+                        fontFamily: isRtl ? 'Noto Nastaliq Urdu' : 'Outfit',
                         startTime: chunkStart,
-                        endTime: chunkEnd > totalDuration ? totalDuration : chunkEnd,
+                        endTime: (totalDuration > 0 && effectiveEnd > totalDuration) ? totalDuration : effectiveEnd,
                         animation: TextAnimationType.none,
                         isAutoLyric: true,
                         zIndex: 0,
@@ -176,10 +198,6 @@ class GroqAutoLyricsService {
                 final end = (seg['end'] as num? ?? (start + 3.0)).toDouble();
                 final segDuration = (end > start) ? (end - start) : 3.0;
 
-                double minEnd = start + 0.5;
-                double maxEnd = totalDuration > minEnd ? totalDuration : minEnd;
-                final segmentEnd = end.clamp(minEnd, maxEnd);
-
                 final words = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
                 List<String> chunks = [];
                 for (int j = 0; j < words.length; j += 3) {
@@ -197,15 +215,19 @@ class GroqAutoLyricsService {
                   double maxEndChunk = totalDuration > minEndChunk ? totalDuration : minEndChunk;
                   final segmentEndChunk = chunkEnd.clamp(minEndChunk, maxEndChunk);
 
+                  final chunkText = chunks[j];
+                  final bool isRtl = RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]').hasMatch(chunkText);
+
                   lyricLayers.add(
                     TextLayerModel(
                       id: uuid.v4(),
-                      text: chunks[j],
+                      text: chunkText,
                       position: const Offset(0.5, 0.75),
-                      fontSize: 26.0,
+                      fontSize: isRtl ? 28.0 : 26.0,
                       textColor: const Color(0xFFFFFFFF),
+                      fontFamily: isRtl ? 'Noto Nastaliq Urdu' : 'Outfit',
                       startTime: chunkStart,
-                      endTime: segmentEndChunk > totalDuration ? totalDuration : segmentEndChunk,
+                      endTime: (totalDuration > 0 && segmentEndChunk > totalDuration) ? totalDuration : segmentEndChunk,
                       animation: TextAnimationType.none,
                       isAutoLyric: true,
                       zIndex: 0,
@@ -241,13 +263,17 @@ class GroqAutoLyricsService {
                     double maxEndChunk = totalDuration > minEndChunk ? totalDuration : minEndChunk;
                     final segmentEndChunk = chunkEnd.clamp(minEndChunk, maxEndChunk);
 
+                    final lineChunk = chunks[j];
+                    final bool isRtl = RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]').hasMatch(lineChunk);
+
                     lyricLayers.add(
                       TextLayerModel(
                         id: uuid.v4(),
-                        text: chunks[j],
+                        text: lineChunk,
                         position: const Offset(0.5, 0.75),
-                        fontSize: 26.0,
+                        fontSize: isRtl ? 28.0 : 26.0,
                         textColor: const Color(0xFFFFFFFF),
+                        fontFamily: isRtl ? 'Noto Nastaliq Urdu' : 'Outfit',
                         startTime: chunkStart,
                         endTime: segmentEndChunk > totalDuration ? totalDuration : segmentEndChunk,
                         animation: TextAnimationType.none,

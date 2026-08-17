@@ -84,10 +84,15 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     }
   }
 
-  void loadProject(EditorProjectModel project) {
+  void loadProject(EditorProjectModel project, {bool resetPlayhead = false}) {
     _isNewProject = false;
     _originalProjectData = project;
-    state = project;
+    state = project.copyWith(
+      currentPlayheadTime: resetPlayhead ? 0.0 : project.currentPlayheadTime,
+      isPlaying: false,
+      isScrubbing: false,
+      selectedLayerId: null,
+    );
     _undoStack.clear();
     _redoStack.clear();
   }
@@ -187,8 +192,29 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   }
 
   void selectLayer(String? id) {
-    if (state.selectedLayerId == id) return;
-    state = state.copyWith(selectedLayerId: id, isTrimMode: false);
+    if (state.selectedLayerId == id && id != null) return;
+    if (id == null) {
+      state = state.copyWith(selectedLayerId: null, isTrimMode: false);
+      return;
+    }
+
+    // Only text layers auto-seek playhead to their startTime
+    double? textStartTime;
+    for (final text in state.textLayers) {
+      if (text.id == id) {
+        textStartTime = text.startTime;
+        break;
+      }
+    }
+
+    state = state.copyWith(
+      selectedLayerId: id,
+      isTrimMode: false,
+      isPlaying: false, // Automatically pause in place upon selection
+      currentPlayheadTime: textStartTime != null
+          ? textStartTime.clamp(0.0, state.duration)
+          : state.currentPlayheadTime, // For video, overlay, audio: preserve exact current playhead time
+    );
   }
 
   // --- Text Layer Operations ---
@@ -395,8 +421,8 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
 
   void addMediaLayer(MediaLayerModel media) {
     pushHistory();
-    if (media.type == MediaType.video) {
-      // Reset playhead to 0 when adding a new video to prevent 5s jump bug
+    if (media.type == MediaType.video && !media.isOverlay && state.mediaLayers.where((m) => !m.isOverlay).isEmpty) {
+      // Reset playhead to 0 when adding initial main video to prevent 5s jump bug
       state = state.copyWith(currentPlayheadTime: 0.0);
     }
     final updated = [...state.mediaLayers, media];
@@ -516,15 +542,56 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
     if (layerIndex == -1) return;
     
     final layer = state.mediaLayers[layerIndex];
-    double newStart = layer.startTime + delta;
-    if (newStart < 0) newStart = 0;
+    double newStart = (layer.startTime + delta).clamp(0.0, (state.duration - 0.2).clamp(0.0, double.infinity));
     
     final updated = List<MediaLayerModel>.from(state.mediaLayers);
     updated[layerIndex] = layer.copyWith(startTime: newStart);
     state = state.copyWith(mediaLayers: updated);
   }
 
-  void replaceMediaLayerPath(String id, String newPath, double newDuration) {
+  void updateMediaLayerCrop(
+    String id, {
+    required double cropLeft,
+    required double cropTop,
+    required double cropRight,
+    required double cropBottom,
+  }) {
+    pushHistory();
+    state = state.copyWith(
+      mediaLayers: state.mediaLayers.map((layer) {
+        if (layer.id == id) {
+          return layer.copyWith(
+            cropLeft: cropLeft.clamp(0.0, 1.0),
+            cropTop: cropTop.clamp(0.0, 1.0),
+            cropRight: cropRight.clamp(0.0, 1.0),
+            cropBottom: cropBottom.clamp(0.0, 1.0),
+          );
+        }
+        return layer;
+      }).toList(),
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void resetMediaLayerCrop(String id) {
+    pushHistory();
+    state = state.copyWith(
+      mediaLayers: state.mediaLayers.map((layer) {
+        if (layer.id == id) {
+          return layer.copyWith(
+            cropLeft: 0.0,
+            cropTop: 0.0,
+            cropRight: 1.0,
+            cropBottom: 1.0,
+          );
+        }
+        return layer;
+      }).toList(),
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void replaceMediaLayerPath(String id, String newPath, double newDuration, {MediaType? newType}) {
     pushHistory();
     state = state.copyWith(
       mediaLayers: state.mediaLayers.map((layer) {
@@ -532,7 +599,9 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
           return layer.copyWith(
             path: newPath,
             mediaDuration: newDuration,
+            originalDuration: newDuration,
             trimStartTime: 0.0,
+            type: newType ?? layer.type,
           );
         }
         return layer;
@@ -586,6 +655,70 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
 
     state = state.copyWith(
       mediaLayers: updated,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void toggleLockMediaLayer(String id) {
+    pushHistory();
+    final updated = state.mediaLayers.map((m) {
+      if (m.id == id) {
+        return m.copyWith(isLocked: !m.isLocked);
+      }
+      return m;
+    }).toList();
+
+    state = state.copyWith(
+      mediaLayers: updated,
+      selectedLayerId: state.selectedLayerId == id ? null : state.selectedLayerId,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void toggleLockTextLayer(String id) {
+    pushHistory();
+    final updated = state.textLayers.map((t) {
+      if (t.id == id) {
+        return t.copyWith(isLocked: !t.isLocked);
+      }
+      return t;
+    }).toList();
+
+    state = state.copyWith(
+      textLayers: updated,
+      selectedLayerId: state.selectedLayerId == id ? null : state.selectedLayerId,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void toggleVisibilityMediaLayer(String id) {
+    pushHistory();
+    final updated = state.mediaLayers.map((m) {
+      if (m.id == id) {
+        return m.copyWith(isVisible: !m.isVisible);
+      }
+      return m;
+    }).toList();
+
+    state = state.copyWith(
+      mediaLayers: updated,
+      selectedLayerId: state.selectedLayerId == id ? null : state.selectedLayerId,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void toggleVisibilityTextLayer(String id) {
+    pushHistory();
+    final updated = state.textLayers.map((t) {
+      if (t.id == id) {
+        return t.copyWith(isVisible: !t.isVisible);
+      }
+      return t;
+    }).toList();
+
+    state = state.copyWith(
+      textLayers: updated,
+      selectedLayerId: state.selectedLayerId == id ? null : state.selectedLayerId,
       updatedAt: DateTime.now(),
     );
   }

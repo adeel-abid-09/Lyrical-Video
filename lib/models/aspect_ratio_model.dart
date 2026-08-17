@@ -84,6 +84,22 @@ class ProjectAspectRatio {
     );
   }
 
+  static ProjectAspectRatio fromType(AspectRatioType type) {
+    switch (type) {
+      case AspectRatioType.ratio16x9:
+        return ratio16x9;
+      case AspectRatioType.ratio1x1:
+        return ratio1x1;
+      case AspectRatioType.ratio4x5:
+        return ratio4x5;
+      case AspectRatioType.auto:
+        return autoMatch;
+      case AspectRatioType.ratio9x16:
+      default:
+        return default9x16;
+    }
+  }
+
   static List<ProjectAspectRatio> get allPresets => [
         default9x16,
         ratio16x9,

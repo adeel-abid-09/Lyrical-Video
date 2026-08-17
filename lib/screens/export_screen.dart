@@ -99,6 +99,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   }
 
   Future<void> _startExport() async {
+    ref.read(editorProjectProvider.notifier).setPlaying(false);
     final project = ref.read(editorProjectProvider);
 
     try {
@@ -182,6 +183,17 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     final project = ref.watch(editorProjectProvider);
     final firstMedia = project.mediaLayers.firstOrNull;
     final percentInt = (_progress * 100).toInt().clamp(0, 100);
+    final ratio = project.aspectRatio.ratio > 0 ? project.aspectRatio.ratio : (9 / 16);
+
+    double cardWidth;
+    double cardHeight;
+    if (ratio >= 1.0) {
+      cardWidth = 320.0;
+      cardHeight = (cardWidth / ratio).clamp(140.0, 360.0);
+    } else {
+      cardHeight = 360.0;
+      cardWidth = (cardHeight * ratio).clamp(160.0, 320.0);
+    }
 
     return PopScope(
       canPop: false,
@@ -221,16 +233,16 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             // Header Titles
             if (_isExporting) ...[
               const Text(
-                'Exporting...',
+                'Exporting without watermark',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 26,
+                  fontSize: 22,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 8),
               const Text(
-                'Keep Lyrical Video open and don\'t lock your screen',
+                'Please don\'t close Lyrical Video or lock your screen.',
                 style: TextStyle(color: Colors.white54, fontSize: 13),
               ),
             ] else if (_errorMessage != null) ...[
@@ -279,8 +291,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                 child: CustomPaint(
                   painter: _isExporting ? _BorderProgressPainter(_progress, 16.0) : null,
                   child: Container(
-                    width: 210,
-                    height: 360,
+                    width: cardWidth,
+                    height: cardHeight,
                     decoration: BoxDecoration(
                       color: const Color(0xFF1C1C26),
                       borderRadius: BorderRadius.circular(16),
@@ -466,31 +478,42 @@ class _BorderProgressPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final bgPaint = Paint()
-      ..color = Colors.white12
+      ..color = const Color(0xFF3E3E50)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
+      ..strokeWidth = 3.5;
 
     final progressPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5
-      ..strokeCap = StrokeCap.round;
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.square;
 
     final rect = Rect.fromLTWH(0, 0, size.width, size.height);
     final rrect = RRect.fromRectAndRadius(rect, Radius.circular(borderRadius));
 
-    // Draw background border
+    // Draw distinct background border track
     canvas.drawRRect(rrect, bgPaint);
 
     if (progress <= 0) return;
 
-    // We can use a PathMetric to draw the progress
-    final path = Path()..addRRect(rrect);
+    // Create clockwise perimeter path starting at top-left corner
+    final path = Path()
+      ..moveTo(borderRadius, 0)
+      ..lineTo(size.width - borderRadius, 0)
+      ..arcToPoint(Offset(size.width, borderRadius), radius: Radius.circular(borderRadius))
+      ..lineTo(size.width, size.height - borderRadius)
+      ..arcToPoint(Offset(size.width - borderRadius, size.height), radius: Radius.circular(borderRadius))
+      ..lineTo(borderRadius, size.height)
+      ..arcToPoint(Offset(0, size.height - borderRadius), radius: Radius.circular(borderRadius))
+      ..lineTo(0, borderRadius)
+      ..arcToPoint(Offset(borderRadius, 0), radius: Radius.circular(borderRadius))
+      ..close();
+
     final metrics = path.computeMetrics().toList();
     if (metrics.isEmpty) return;
 
     final metric = metrics.first;
-    final extractPath = metric.extractPath(0.0, metric.length * progress);
+    final extractPath = metric.extractPath(0.0, metric.length * progress.clamp(0.0, 1.0));
     canvas.drawPath(extractPath, progressPaint);
   }
 
