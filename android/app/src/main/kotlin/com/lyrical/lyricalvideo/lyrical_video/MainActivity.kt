@@ -1,6 +1,7 @@
 package com.lyrical.lyricalvideo.lyrical_video
 
 import android.content.ContentValues
+import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
@@ -48,6 +49,13 @@ class MainActivity: FlutterActivity() {
                     FileInputStream(file).use { inputStream ->
                         inputStream.copyTo(outputStream)
                     }
+                }
+                try {
+                    val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                    mediaScanIntent.data = uri
+                    sendBroadcast(mediaScanIntent)
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
                 true
             } else {

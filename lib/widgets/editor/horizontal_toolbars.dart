@@ -35,11 +35,16 @@ enum ToolbarCategory {
   textGlow,
   textBackground,
   textSize,
+  textRotate,
+  textLineSpacing,
+  textLetterSpacing,
+  textOpacity,
   textFont,
   textTemplates,
   textEffects,
   textAnimations,
   textBubbles,
+  textAlignment,
   audio,
   video,
   media,
@@ -69,6 +74,7 @@ class HorizontalToolbarsWidget extends ConsumerStatefulWidget {
 class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWidget> {
   ToolbarCategory _activeCategory = ToolbarCategory.main;
   bool _isAutoLyricsLoading = false;
+  final Map<ToolbarCategory, bool> _applyToAllStates = {};
 
   final ImagePicker _picker = ImagePicker();
 
@@ -809,9 +815,246 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     );
   }
 
+  bool _isStyleSubtool(ToolbarCategory cat) {
+    return cat == ToolbarCategory.textStyle ||
+           cat == ToolbarCategory.textColor ||
+           cat == ToolbarCategory.textStroke ||
+           cat == ToolbarCategory.textGlow ||
+           cat == ToolbarCategory.textBackground ||
+           cat == ToolbarCategory.textSize ||
+           cat == ToolbarCategory.textFont ||
+           cat == ToolbarCategory.textEffects ||
+           cat == ToolbarCategory.textAnimations ||
+           cat == ToolbarCategory.textBubbles ||
+           cat == ToolbarCategory.textPresets ||
+           cat == ToolbarCategory.textAlignment ||
+           cat == ToolbarCategory.textRotate ||
+           cat == ToolbarCategory.textLineSpacing ||
+           cat == ToolbarCategory.textLetterSpacing ||
+           cat == ToolbarCategory.textOpacity ||
+           cat == ToolbarCategory.textTemplates;
+  }
+
+  void _triggerApplyToAllStyle() {
+    final project = ref.read(editorProjectProvider);
+    final selectedId = project.selectedLayerId;
+    if (selectedId == null) return;
+    final selectedText = project.textLayers.where((l) => l.id == selectedId).firstOrNull;
+    if (selectedText == null) return;
+
+    final notifier = ref.read(editorProjectProvider.notifier);
+
+    switch (_activeCategory) {
+      case ToolbarCategory.textColor:
+        notifier.updateAllTextLayersStyle(
+          textColor: selectedText.textColor,
+        );
+        break;
+      case ToolbarCategory.textFont:
+        notifier.updateAllTextLayersStyle(
+          fontFamily: selectedText.fontFamily,
+        );
+        break;
+      case ToolbarCategory.textPresets:
+        notifier.updateAllTextLayersStyle(
+          textColor: selectedText.textColor,
+          strokeColor: selectedText.strokeColor,
+          strokeWidth: selectedText.strokeWidth,
+          backgroundColor: selectedText.backgroundColor,
+          clearStroke: selectedText.strokeColor == null,
+          clearBackground: selectedText.backgroundColor == null,
+        );
+        break;
+      case ToolbarCategory.textStroke:
+        notifier.updateAllTextLayersStyle(
+          strokeColor: selectedText.strokeColor,
+          strokeWidth: selectedText.strokeWidth,
+          clearStroke: selectedText.strokeColor == null,
+        );
+        break;
+      case ToolbarCategory.textGlow:
+        notifier.updateAllTextLayersStyle(
+          strokeColor: selectedText.strokeColor,
+          strokeWidth: selectedText.strokeWidth,
+          clearStroke: selectedText.strokeColor == null,
+        );
+        break;
+      case ToolbarCategory.textBackground:
+        notifier.updateAllTextLayersStyle(
+          backgroundColor: selectedText.backgroundColor,
+          textColor: selectedText.textColor,
+          clearBackground: selectedText.backgroundColor == null,
+        );
+        break;
+      case ToolbarCategory.textAnimations:
+        notifier.updateAllTextLayersStyle(
+          animation: selectedText.animation,
+          animationDuration: selectedText.animationDuration,
+        );
+        break;
+      case ToolbarCategory.textBubbles:
+        notifier.updateAllTextLayersStyle(
+          bubbleStyle: selectedText.bubbleStyle,
+          textColor: selectedText.textColor,
+          backgroundColor: selectedText.backgroundColor,
+          clearBubble: selectedText.bubbleStyle == null || selectedText.bubbleStyle == 'none',
+        );
+        break;
+      case ToolbarCategory.textStyle:
+        notifier.updateAllTextLayersStyle(
+          fontWeight: selectedText.fontWeight,
+          fontStyle: selectedText.fontStyle,
+          textAlign: selectedText.textAlign,
+          letterSpacing: selectedText.letterSpacing,
+          lineSpacing: selectedText.lineSpacing,
+          opacity: selectedText.opacity,
+        );
+        break;
+      case ToolbarCategory.textAlignment:
+        notifier.updateAllTextLayersStyle(
+          textAlign: selectedText.textAlign,
+          position: selectedText.position,
+        );
+        break;
+      case ToolbarCategory.textSize:
+        notifier.updateAllTextLayersStyle(
+          fontSize: selectedText.fontSize,
+        );
+        break;
+      case ToolbarCategory.textRotate:
+        notifier.updateAllTextLayersStyle(
+          rotation: selectedText.rotation,
+        );
+        break;
+      case ToolbarCategory.textLineSpacing:
+        notifier.updateAllTextLayersStyle(
+          lineSpacing: selectedText.lineSpacing,
+        );
+        break;
+      case ToolbarCategory.textLetterSpacing:
+        notifier.updateAllTextLayersStyle(
+          letterSpacing: selectedText.letterSpacing,
+        );
+        break;
+      case ToolbarCategory.textOpacity:
+        notifier.updateAllTextLayersStyle(
+          opacity: selectedText.opacity,
+        );
+        break;
+      case ToolbarCategory.textTemplates:
+        if (selectedText.animation == TextAnimationType.none && (selectedText.strokeColor == null || selectedText.strokeColor == Colors.transparent)) {
+          notifier.updateAllTextLayersStyle(
+            textColor: Colors.white,
+            fontFamily: 'Outfit',
+            clearStroke: true,
+            clearBackground: true,
+            animation: TextAnimationType.none,
+          );
+        } else {
+          notifier.updateAllTextLayersStyle(
+            textColor: selectedText.textColor,
+            strokeColor: selectedText.strokeColor,
+            strokeWidth: selectedText.strokeWidth,
+            clearStroke: selectedText.strokeColor == null,
+            backgroundColor: selectedText.backgroundColor,
+            clearBackground: selectedText.backgroundColor == null,
+            fontFamily: selectedText.fontFamily,
+            animation: selectedText.animation,
+          );
+        }
+        break;
+      case ToolbarCategory.textEffects:
+        if (selectedText.strokeColor == null || selectedText.strokeColor == Colors.transparent) {
+          notifier.updateAllTextLayersStyle(
+            textColor: Colors.white,
+            clearStroke: true,
+            clearBackground: true,
+          );
+        } else {
+          notifier.updateAllTextLayersStyle(
+            textColor: selectedText.textColor,
+            strokeColor: selectedText.strokeColor,
+            strokeWidth: selectedText.strokeWidth,
+            clearStroke: selectedText.strokeColor == null,
+            backgroundColor: selectedText.backgroundColor,
+            clearBackground: selectedText.backgroundColor == null,
+          );
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  void _updateTextLayerStyle(TextLayerModel updated) {
+    if (_applyToAllStates[_activeCategory] == true) {
+      setState(() {
+        _applyToAllStates[_activeCategory] = false;
+      });
+      if (_activeCategory == ToolbarCategory.textAlignment) {
+        ref.read(editorProjectProvider.notifier).syncPositionToAll = false;
+      }
+    }
+    ref.read(editorProjectProvider.notifier).updateTextLayer(updated);
+  }
+
+  Widget _buildApplyToAllSection() {
+    final isApplied = _applyToAllStates[_activeCategory] ?? false;
+    return InkWell(
+      onTap: () {
+        final nextState = !isApplied;
+        setState(() {
+          _applyToAllStates[_activeCategory] = nextState;
+        });
+        if (_activeCategory == ToolbarCategory.textAlignment) {
+          ref.read(editorProjectProvider.notifier).syncPositionToAll = nextState;
+        }
+        if (nextState) {
+          _triggerApplyToAllStyle();
+        }
+      },
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(
+              isApplied ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+              size: 13,
+              color: isApplied ? const Color(0xFF00E5FF) : Colors.white60,
+            ),
+            const SizedBox(width: 4),
+            const Text(
+              'Apply to All',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 9.5,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = ref.watch(editorProjectProvider);
+
+    // If syncPositionToAll was disabled programmatically (e.g. by manual dragging), uncheck the alignment checkbox
+    final notifierSync = ref.watch(editorProjectProvider.select((_) => ref.read(editorProjectProvider.notifier).syncPositionToAll));
+    if (_applyToAllStates[ToolbarCategory.textAlignment] == true && !notifierSync) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _applyToAllStates[ToolbarCategory.textAlignment] = false;
+          });
+        }
+      });
+    }
 
     ref.listen(editorProjectProvider, (previous, next) {
       if (previous?.selectedLayerId != next.selectedLayerId) {
@@ -836,55 +1079,71 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
       }
     });
 
+    final isStyle = _isStyleSubtool(_activeCategory);
     return Container(
-      height: 60,
+      height: isStyle ? 75 : 60,
       color: const Color(0xFF14141E),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Multi-Tier Back Button [ < ]
-          if (_activeCategory != ToolbarCategory.main)
-            GestureDetector(
-              onTap: () {
-                if (_activeCategory == ToolbarCategory.textPresets ||
-                    _activeCategory == ToolbarCategory.textColor ||
-                    _activeCategory == ToolbarCategory.textStroke ||
-                    _activeCategory == ToolbarCategory.textGlow ||
-                    _activeCategory == ToolbarCategory.textBackground ||
-                    _activeCategory == ToolbarCategory.textSize) {
-                  setState(() => _activeCategory = ToolbarCategory.textStyle);
-                } else if (_activeCategory == ToolbarCategory.textStyle ||
-                    _activeCategory == ToolbarCategory.textFont ||
-                    _activeCategory == ToolbarCategory.textTemplates ||
-                    _activeCategory == ToolbarCategory.textEffects ||
-                    _activeCategory == ToolbarCategory.textAnimations ||
-                    _activeCategory == ToolbarCategory.textBubbles) {
-                  setState(() => _activeCategory = ToolbarCategory.text);
-                } else {
-                  ref.read(editorProjectProvider.notifier).selectLayer(null);
-                  setState(() => _activeCategory = ToolbarCategory.main);
-                }
-              },
-              child: Container(
-                width: 48,
-                height: 60,
-                margin: const EdgeInsets.only(right: 4),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF222232),
-                  border: Border(right: BorderSide(color: Colors.white10, width: 1)),
-                ),
-                child: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 16),
-              ),
+          if (isStyle)
+            Container(
+              height: 20,
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 12, top: 4),
+              child: _buildApplyToAllSection(),
             ),
-
-          // Action Items / Sub-menus
           Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                children: _buildActiveToolbarItems(),
-              ),
+            child: Row(
+              children: [
+                // Multi-Tier Back Button [ < ]
+                if (_activeCategory != ToolbarCategory.main)
+                  GestureDetector(
+                    onTap: () {
+                      if (_activeCategory == ToolbarCategory.textPresets ||
+                          _activeCategory == ToolbarCategory.textColor ||
+                          _activeCategory == ToolbarCategory.textStroke ||
+                          _activeCategory == ToolbarCategory.textGlow ||
+                          _activeCategory == ToolbarCategory.textBackground ||
+                          _activeCategory == ToolbarCategory.textSize ||
+                          _activeCategory == ToolbarCategory.textAlignment) {
+                        setState(() => _activeCategory = ToolbarCategory.textStyle);
+                      } else if (_activeCategory == ToolbarCategory.textStyle ||
+                          _activeCategory == ToolbarCategory.textFont ||
+                          _activeCategory == ToolbarCategory.textTemplates ||
+                          _activeCategory == ToolbarCategory.textEffects ||
+                          _activeCategory == ToolbarCategory.textAnimations ||
+                          _activeCategory == ToolbarCategory.textBubbles) {
+                        setState(() => _activeCategory = ToolbarCategory.text);
+                      } else {
+                        ref.read(editorProjectProvider.notifier).selectLayer(null);
+                        setState(() => _activeCategory = ToolbarCategory.main);
+                      }
+                    },
+                    child: Container(
+                      width: 48,
+                      height: double.infinity,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF222232),
+                        border: Border(right: BorderSide(color: Colors.white10, width: 1)),
+                      ),
+                      child: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 16),
+                    ),
+                  ),
+
+                // Action Items / Sub-menus
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(
+                      children: _buildActiveToolbarItems(),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1004,9 +1263,11 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             }),
           ],
         ];
-
       case ToolbarCategory.textStyle:
         return [
+          _buildItem(Icons.format_align_center_rounded, 'Alignment', () {
+            setState(() => _activeCategory = ToolbarCategory.textAlignment);
+          }),
           _buildItem(Icons.auto_awesome_motion_rounded, 'Presets', () {
             setState(() => _activeCategory = ToolbarCategory.textPresets);
           }),
@@ -1014,78 +1275,16 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             setState(() => _activeCategory = ToolbarCategory.textColor);
           }),
           _buildItem(Icons.format_size_rounded, 'Size', () {
-            final project = ref.read(editorProjectProvider);
-            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-            if (selectedText != null) {
-              _showSliderBottomSheet(
-                title: 'Font Size',
-                initialValue: selectedText.fontSize,
-                min: 10.0,
-                max: 150.0,
-                unit: 'px',
-                isInteger: true,
-                onChanged: (val) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(fontSize: val));
-                },
-              );
-            }
+            setState(() => _activeCategory = ToolbarCategory.textSize);
           }),
           _buildItem(Icons.rotate_right_rounded, 'Rotate', () {
-            final project = ref.read(editorProjectProvider);
-            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-            if (selectedText != null) {
-              double currentDeg = (selectedText.rotation * 180 / pi) % 360;
-              if (currentDeg > 180) currentDeg -= 360;
-              if (currentDeg < -180) currentDeg += 360;
-
-              _showSliderBottomSheet(
-                title: 'Rotation',
-                initialValue: currentDeg,
-                min: -180.0,
-                max: 180.0,
-                unit: '°',
-                isInteger: true,
-                onChanged: (deg) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
-                    selectedText.copyWith(rotation: deg * pi / 180.0),
-                  );
-                },
-              );
-            }
+            setState(() => _activeCategory = ToolbarCategory.textRotate);
           }),
           _buildItem(Icons.format_line_spacing_rounded, 'Line Spacing', () {
-            final project = ref.read(editorProjectProvider);
-            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-            if (selectedText != null) {
-              _showSliderBottomSheet(
-                title: 'Line Spacing',
-                initialValue: selectedText.lineSpacing,
-                min: 0.8,
-                max: 3.0,
-                unit: 'x',
-                isInteger: false,
-                onChanged: (val) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(lineSpacing: val));
-                },
-              );
-            }
+            setState(() => _activeCategory = ToolbarCategory.textLineSpacing);
           }),
           _buildItem(Icons.space_bar_rounded, 'Letter Spacing', () {
-            final project = ref.read(editorProjectProvider);
-            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-            if (selectedText != null) {
-              _showSliderBottomSheet(
-                title: 'Letter Spacing',
-                initialValue: selectedText.letterSpacing,
-                min: -2.0,
-                max: 20.0,
-                unit: 'px',
-                isInteger: false,
-                onChanged: (val) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(letterSpacing: val));
-                },
-              );
-            }
+            setState(() => _activeCategory = ToolbarCategory.textLetterSpacing);
           }),
           _buildItem(Icons.border_color_rounded, 'Stroke', () {
             setState(() => _activeCategory = ToolbarCategory.textStroke);
@@ -1097,21 +1296,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             setState(() => _activeCategory = ToolbarCategory.textBackground);
           }),
           _buildItem(Icons.opacity_rounded, 'Opacity', () {
-            final project = ref.read(editorProjectProvider);
-            final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
-            if (selectedText != null) {
-              _showSliderBottomSheet(
-                title: 'Opacity',
-                initialValue: selectedText.opacity,
-                min: 0.0,
-                max: 1.0,
-                unit: '',
-                isInteger: false,
-                onChanged: (val) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(opacity: val));
-                },
-              );
-            }
+            setState(() => _activeCategory = ToolbarCategory.textOpacity);
           }),
         ];
 
@@ -1138,7 +1323,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           return GestureDetector(
             onTap: () {
               if (selectedText != null) {
-                ref.read(editorProjectProvider.notifier).updateTextLayer(
+                _updateTextLayerStyle(
                   selectedText.copyWith(
                     textColor: fg,
                     strokeColor: stroke == Colors.transparent ? null : stroke,
@@ -1187,7 +1372,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                   min: 12.0,
                   max: 80.0,
                   onChanged: (val) {
-                    ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(fontSize: val));
+                    _updateTextLayerStyle(selectedText.copyWith(fontSize: val));
                   },
                 );
               }
@@ -1222,7 +1407,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                   context,
                   initialColor: selectedText.textColor,
                   onColorChanged: (newColor) {
-                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    _updateTextLayerStyle(
                       selectedText.copyWith(textColor: newColor),
                     );
                   },
@@ -1263,7 +1448,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             return GestureDetector(
               onTap: () {
                 if (selectedText != null) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(textColor: color));
+                  _updateTextLayerStyle(selectedText.copyWith(textColor: color));
                 }
               },
               child: Container(
@@ -1305,7 +1490,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                   context,
                   initialColor: selectedText.strokeColor ?? Colors.black,
                   onColorChanged: (newColor) {
-                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    _updateTextLayerStyle(
                       selectedText.copyWith(strokeColor: newColor, strokeWidth: selectedText.strokeWidth > 0 ? selectedText.strokeWidth : 2.0),
                     );
                   },
@@ -1341,7 +1526,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             return GestureDetector(
               onTap: () {
                 if (selectedText != null) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  _updateTextLayerStyle(
                     selectedText.copyWith(
                       strokeColor: color == Colors.transparent ? null : color,
                       strokeWidth: color == Colors.transparent ? 0.0 : (selectedText.strokeWidth > 0 ? selectedText.strokeWidth : 2.0),
@@ -1392,7 +1577,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                   context,
                   initialColor: selectedText.strokeColor ?? Colors.cyanAccent,
                   onColorChanged: (newColor) {
-                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    _updateTextLayerStyle(
                       selectedText.copyWith(strokeColor: newColor, strokeWidth: 4.0),
                     );
                   },
@@ -1428,7 +1613,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             return GestureDetector(
               onTap: () {
                 if (selectedText != null) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  _updateTextLayerStyle(
                     selectedText.copyWith(
                       strokeColor: color == Colors.transparent ? null : color,
                       strokeWidth: color == Colors.transparent ? 0.0 : 4.0,
@@ -1478,7 +1663,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                   context,
                   initialColor: selectedText.backgroundColor ?? Colors.black87,
                   onColorChanged: (newColor) {
-                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    _updateTextLayerStyle(
                       selectedText.copyWith(
                         backgroundColor: newColor,
                         textColor: (newColor.computeLuminance() > 0.5) ? Colors.black : Colors.white,
@@ -1517,7 +1702,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             return GestureDetector(
               onTap: () {
                 if (selectedText != null) {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  _updateTextLayerStyle(
                     selectedText.copyWith(
                       backgroundColor: color == Colors.transparent ? null : color,
                       textColor: (color == Colors.yellowAccent || color == Colors.white) ? Colors.black : Colors.white,
@@ -1554,7 +1739,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
           return GestureDetector(
             onTap: () {
               if (selectedText != null) {
-                ref.read(editorProjectProvider.notifier).updateTextLayer(selectedText.copyWith(fontFamily: font));
+                _updateTextLayerStyle(selectedText.copyWith(fontFamily: font));
               }
             },
             child: Container(
@@ -1600,7 +1785,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             onTap: () {
               if (selectedText != null) {
                 if (def.id == 'none') {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  _updateTextLayerStyle(
                     selectedText.copyWith(
                       textColor: Colors.white,
                       fontFamily: 'Outfit',
@@ -1610,7 +1795,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                     ),
                   );
                 } else {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  _updateTextLayerStyle(
                     selectedText.copyWith(
                       textColor: def.textColor,
                       strokeColor: def.strokeColor,
@@ -1643,7 +1828,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             onTap: () {
               if (selectedText != null) {
                 if (def.id == 'none') {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  _updateTextLayerStyle(
                     selectedText.copyWith(
                       textColor: Colors.white,
                       clearStroke: true,
@@ -1651,7 +1836,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                     ),
                   );
                 } else {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  _updateTextLayerStyle(
                     selectedText.copyWith(
                       textColor: def.textColor,
                       strokeColor: def.strokeColor,
@@ -1679,7 +1864,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             isSelected: isSelected,
             onTap: () {
               if (selectedText != null) {
-                ref.read(editorProjectProvider.notifier).updateTextLayer(
+                _updateTextLayerStyle(
                   selectedText.copyWith(animation: def.type),
                 );
               }
@@ -1694,7 +1879,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                   unit: 's',
                   isInteger: false,
                   onChanged: (val) {
-                    ref.read(editorProjectProvider.notifier).updateTextLayer(
+                    _updateTextLayerStyle(
                       selectedText.copyWith(animationDuration: val),
                     );
                   },
@@ -1718,7 +1903,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             onTap: () {
               if (selectedText != null) {
                 if (def.id == 'none') {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  _updateTextLayerStyle(
                     selectedText.copyWith(
                       clearBubble: true,
                       clearBackground: true,
@@ -1727,7 +1912,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
                     ),
                   );
                 } else {
-                  ref.read(editorProjectProvider.notifier).updateTextLayer(
+                  _updateTextLayerStyle(
                     selectedText.copyWith(
                       bubbleStyle: def.id,
                       clearBoxSize: true,
@@ -1741,6 +1926,277 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
             },
           );
         }).toList();
+
+      case ToolbarCategory.textAlignment:
+        final project = ref.watch(editorProjectProvider);
+        final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+
+        return [
+          _buildItem(
+            Icons.format_align_left_rounded,
+            'Text L',
+            () {
+              if (selectedText != null) {
+                _updateTextLayerStyle(selectedText.copyWith(textAlign: TextAlign.left));
+              }
+            },
+            highlight: selectedText?.textAlign == TextAlign.left,
+          ),
+          _buildItem(
+            Icons.format_align_center_rounded,
+            'Text C',
+            () {
+              if (selectedText != null) {
+                _updateTextLayerStyle(selectedText.copyWith(textAlign: TextAlign.center));
+              }
+            },
+            highlight: selectedText?.textAlign == TextAlign.center,
+          ),
+          _buildItem(
+            Icons.format_align_right_rounded,
+            'Text R',
+            () {
+              if (selectedText != null) {
+                _updateTextLayerStyle(selectedText.copyWith(textAlign: TextAlign.right));
+              }
+            },
+            highlight: selectedText?.textAlign == TextAlign.right,
+          ),
+          _buildItem(
+            Icons.align_horizontal_left_rounded,
+            'Pos L',
+            () {
+              if (selectedText != null) {
+                _updateTextLayerStyle(selectedText.copyWith(position: Offset(0.15, selectedText.position.dy)));
+              }
+            },
+          ),
+          _buildItem(
+            Icons.align_horizontal_center_rounded,
+            'Pos C',
+            () {
+              if (selectedText != null) {
+                _updateTextLayerStyle(selectedText.copyWith(position: Offset(0.5, selectedText.position.dy)));
+              }
+            },
+          ),
+          _buildItem(
+            Icons.align_horizontal_right_rounded,
+            'Pos R',
+            () {
+              if (selectedText != null) {
+                _updateTextLayerStyle(selectedText.copyWith(position: Offset(0.85, selectedText.position.dy)));
+              }
+            },
+          ),
+          _buildItem(
+            Icons.align_vertical_top_rounded,
+            'Pos Top',
+            () {
+              if (selectedText != null) {
+                _updateTextLayerStyle(selectedText.copyWith(position: Offset(selectedText.position.dx, 0.15)));
+              }
+            },
+          ),
+          _buildItem(
+            Icons.align_vertical_center_rounded,
+            'Pos Mid',
+            () {
+              if (selectedText != null) {
+                _updateTextLayerStyle(selectedText.copyWith(position: Offset(selectedText.position.dx, 0.5)));
+              }
+            },
+          ),
+          _buildItem(
+            Icons.align_vertical_bottom_rounded,
+            'Pos Bot',
+            () {
+              if (selectedText != null) {
+                _updateTextLayerStyle(selectedText.copyWith(position: Offset(selectedText.position.dx, 0.8)));
+              }
+            },
+          ),
+          _buildItem(
+            Icons.open_with_rounded,
+            'Manual Drag',
+            () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Drag text freely on screen to set manual position.'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+        ];
+
+      case ToolbarCategory.textSize:
+        final project = ref.watch(editorProjectProvider);
+        final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+        if (selectedText == null) return [];
+        return [
+          const SizedBox(width: 8),
+          const Icon(Icons.format_size_rounded, size: 16, color: Colors.white54),
+          Container(
+            width: 170,
+            child: SliderTheme(
+              data: const SliderThemeData(
+                activeTrackColor: AppTheme.primaryAccent,
+                inactiveTrackColor: Colors.white24,
+                thumbColor: AppTheme.primaryAccent,
+                trackHeight: 3.0,
+                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6.0),
+              ),
+              child: Slider(
+                value: selectedText.fontSize.clamp(10.0, 150.0),
+                min: 10.0,
+                max: 150.0,
+                onChanged: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(fontSize: val));
+                },
+              ),
+            ),
+          ),
+          Text(
+            '${selectedText.fontSize.toInt()} px',
+            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          ),
+        ];
+
+      case ToolbarCategory.textRotate:
+        final project = ref.watch(editorProjectProvider);
+        final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+        if (selectedText == null) return [];
+        double currentDeg = (selectedText.rotation * 180 / pi) % 360;
+        if (currentDeg > 180) currentDeg -= 360;
+        if (currentDeg < -180) currentDeg += 360;
+        return [
+          const SizedBox(width: 8),
+          const Icon(Icons.rotate_right_rounded, size: 16, color: Colors.white54),
+          Container(
+            width: 170,
+            child: SliderTheme(
+              data: const SliderThemeData(
+                activeTrackColor: AppTheme.primaryAccent,
+                inactiveTrackColor: Colors.white24,
+                thumbColor: AppTheme.primaryAccent,
+                trackHeight: 3.0,
+                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6.0),
+              ),
+              child: Slider(
+                value: currentDeg.clamp(-180.0, 180.0),
+                min: -180.0,
+                max: 180.0,
+                onChanged: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(rotation: val * pi / 180.0));
+                },
+              ),
+            ),
+          ),
+          Text(
+            '${currentDeg.toInt()}°',
+            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          ),
+        ];
+
+      case ToolbarCategory.textLineSpacing:
+        final project = ref.watch(editorProjectProvider);
+        final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+        if (selectedText == null) return [];
+        return [
+          const SizedBox(width: 8),
+          const Icon(Icons.format_line_spacing_rounded, size: 16, color: Colors.white54),
+          Container(
+            width: 170,
+            child: SliderTheme(
+              data: const SliderThemeData(
+                activeTrackColor: AppTheme.primaryAccent,
+                inactiveTrackColor: Colors.white24,
+                thumbColor: AppTheme.primaryAccent,
+                trackHeight: 3.0,
+                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6.0),
+              ),
+              child: Slider(
+                value: selectedText.lineSpacing.clamp(0.8, 3.0),
+                min: 0.8,
+                max: 3.0,
+                onChanged: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(lineSpacing: val));
+                },
+              ),
+            ),
+          ),
+          Text(
+            '${selectedText.lineSpacing.toStringAsFixed(1)}x',
+            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          ),
+        ];
+
+      case ToolbarCategory.textLetterSpacing:
+        final project = ref.watch(editorProjectProvider);
+        final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+        if (selectedText == null) return [];
+        return [
+          const SizedBox(width: 8),
+          const Icon(Icons.space_bar_rounded, size: 16, color: Colors.white54),
+          Container(
+            width: 170,
+            child: SliderTheme(
+              data: const SliderThemeData(
+                activeTrackColor: AppTheme.primaryAccent,
+                inactiveTrackColor: Colors.white24,
+                thumbColor: AppTheme.primaryAccent,
+                trackHeight: 3.0,
+                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6.0),
+              ),
+              child: Slider(
+                value: selectedText.letterSpacing.clamp(-2.0, 20.0),
+                min: -2.0,
+                max: 20.0,
+                onChanged: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(letterSpacing: val));
+                },
+              ),
+            ),
+          ),
+          Text(
+            '${selectedText.letterSpacing.toStringAsFixed(1)}px',
+            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          ),
+        ];
+
+      case ToolbarCategory.textOpacity:
+        final project = ref.watch(editorProjectProvider);
+        final selectedText = project.textLayers.where((l) => l.id == project.selectedLayerId).firstOrNull;
+        if (selectedText == null) return [];
+        return [
+          const SizedBox(width: 8),
+          const Icon(Icons.opacity_rounded, size: 16, color: Colors.white54),
+          Container(
+            width: 170,
+            child: SliderTheme(
+              data: const SliderThemeData(
+                activeTrackColor: AppTheme.primaryAccent,
+                inactiveTrackColor: Colors.white24,
+                thumbColor: AppTheme.primaryAccent,
+                trackHeight: 3.0,
+                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6.0),
+              ),
+              child: Slider(
+                value: selectedText.opacity.clamp(0.0, 1.0),
+                min: 0.0,
+                max: 1.0,
+                onChanged: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(opacity: val));
+                },
+              ),
+            ),
+          ),
+          Text(
+            '${(selectedText.opacity * 100).toInt()}%',
+            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          ),
+        ];
 
       case ToolbarCategory.media:
       case ToolbarCategory.video:

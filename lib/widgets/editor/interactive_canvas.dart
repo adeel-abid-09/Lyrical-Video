@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../models/media_layer_model.dart';
 import '../../models/aspect_ratio_model.dart';
@@ -57,6 +58,21 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _startPlaybackTimer();
+    if (!kIsWeb && Platform.isAndroid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _requestStorageAndMediaPermissions();
+      });
+    }
+  }
+
+  Future<void> _requestStorageAndMediaPermissions() async {
+    try {
+      await [
+        Permission.videos,
+        Permission.photos,
+        Permission.storage,
+      ].request();
+    } catch (_) {}
   }
 
   void _startPlaybackTimer() {
@@ -158,6 +174,9 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                 title: const Text('Pick Video from Gallery', style: TextStyle(color: Colors.white)),
                 onTap: () async {
                   Navigator.pop(context);
+                  if (!kIsWeb && Platform.isAndroid) {
+                    await [Permission.videos, Permission.storage].request();
+                  }
                   final XFile? file = await _picker.pickVideo(source: ImageSource.gallery);
                   if (file != null) {
                     double duration = 15.0;
@@ -193,6 +212,9 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                 title: const Text('Pick Image / Photo from Gallery', style: TextStyle(color: Colors.white)),
                 onTap: () async {
                   Navigator.pop(context);
+                  if (!kIsWeb && Platform.isAndroid) {
+                    await [Permission.photos, Permission.storage].request();
+                  }
                   final XFile? file = await _picker.pickImage(source: ImageSource.gallery);
                   if (file != null) {
                     final media = MediaLayerModel(
@@ -242,7 +264,13 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
               if (mounted) setState(() {});
             });
           }
-        }).catchError((_) {});
+        }).catchError((error) {
+          print("DEBUG: Video initialization failed for ${layer.path}: $error");
+          _videoControllers.remove(layer.id);
+          try {
+            ctrl.dispose();
+          } catch (_) {}
+        });
       }
     }
     
@@ -250,6 +278,7 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
     for (final layer in audioLayers) {
       if (!_audioPlayers.containsKey(layer.id)) {
         final p = AudioPlayer();
+        _audioPlayers[layer.id] = p;
         p.setFilePath(layer.path).then((_) {
           if (mounted) {
             final initLayerTime = (currentPlayheadTime - layer.startTime) + layer.trimStartTime;
@@ -257,8 +286,13 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
             p.setVolume(layer.isMuted ? 0.0 : layer.volume);
             p.seek(Duration(milliseconds: (clamped * 1000).toInt()));
           }
-        }).catchError((_) {});
-        _audioPlayers[layer.id] = p;
+        }).catchError((error) {
+          print("DEBUG: Audio initialization failed for ${layer.path}: $error");
+          _audioPlayers.remove(layer.id);
+          try {
+            p.dispose();
+          } catch (_) {}
+        });
       }
     }
 
@@ -821,6 +855,8 @@ class _InteractiveCanvasWidgetState extends ConsumerState<InteractiveCanvasWidge
                                                     notifier.pushHistory();
                                                     notifier.selectLayer(textLayer.id);
                                                     _baseTextPosition = textLayer.position;
+                                                    // Turn off sync position to all when manual drag starts!
+                                                    notifier.syncPositionToAll = false;
                                                   },
                                                   onPanUpdate: textLayer.isLocked ? null : (details) {
                                                     final currentDx = _baseTextPosition.dx * canvasW;

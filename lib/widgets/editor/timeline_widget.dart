@@ -106,9 +106,9 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
     final project = ref.watch(editorProjectProvider);
     final notifier = ref.read(editorProjectProvider.notifier);
 
-    final duration = project.duration;
+    final duration = project.duration.isFinite && !project.duration.isNaN && project.duration > 0 ? project.duration : 15.0;
     final totalSeconds = duration; // Removed the arbitrary +5 seconds overscroll!
-    final playhead = project.currentPlayheadTime;
+    final playhead = project.currentPlayheadTime.isFinite && !project.currentPlayheadTime.isNaN ? project.currentPlayheadTime : 0.0;
 
     ref.listen<double>(editorProjectProvider.select((p) => p.currentPlayheadTime), (prev, next) {
       if (!_isUserScrolling && _horizontalScrollController.hasClients) {
@@ -298,9 +298,11 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                        final isSelected = project.selectedLayerId == media.id;
                                                        final isDragging = _draggingMediaId == media.id;
                                                        final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : (isDragging ? 0.85 : 1.0);
+                                                       final double mediaStart = media.startTime.isFinite && !media.startTime.isNaN ? media.startTime : 0.0;
+                                                       final double mediaDurRaw = media.mediaDuration.isFinite && !media.mediaDuration.isNaN && media.mediaDuration > 0 ? media.mediaDuration : duration;
                                                        return Positioned(
-                                                         left: media.startTime * _timeScale,
-                                                         width: (media.mediaDuration > 0 ? media.mediaDuration : duration) * _timeScale,
+                                                         left: mediaStart * _timeScale,
+                                                         width: mediaDurRaw * _timeScale,
                                                          top: 0,
                                                          bottom: 0,
                                                          child: Opacity(
@@ -461,9 +463,11 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                     final isSelected = project.selectedLayerId == media.id;
                                                     final isDragging = _draggingMediaId == media.id;
                                                     final double opacity = (project.isTrimMode && !isSelected) ? 0.3 : (isDragging ? 0.85 : 1.0);
+                                                    final double mediaStart = media.startTime.isFinite && !media.startTime.isNaN ? media.startTime : 0.0;
+                                                    final double mediaDurRaw = media.mediaDuration.isFinite && !media.mediaDuration.isNaN && media.mediaDuration > 0 ? media.mediaDuration : duration;
                                                     return Positioned(
-                                                      left: media.startTime * _timeScale,
-                                                      width: (media.mediaDuration > 0 ? media.mediaDuration : duration) * _timeScale,
+                                                      left: mediaStart * _timeScale,
+                                                      width: mediaDurRaw * _timeScale,
                                                       top: 0,
                                                       bottom: 0,
                                                       child: Opacity(
@@ -613,8 +617,8 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
                                                   child: Stack(
                                                     children: [
                                                       Positioned(
-                                                        left: audio.startTime * _timeScale,
-                                                        width: audio.mediaDuration * _timeScale,
+                                                        left: (audio.startTime.isFinite && !audio.startTime.isNaN ? audio.startTime : 0.0) * _timeScale,
+                                                        width: (audio.mediaDuration.isFinite && !audio.mediaDuration.isNaN && audio.mediaDuration > 0 ? audio.mediaDuration : duration) * _timeScale,
                                                         top: 0,
                                                         bottom: 0,
                                                         child: Opacity(
@@ -1007,10 +1011,14 @@ class _CapCutTimelineWidgetState extends ConsumerState<CapCutTimelineWidget> {
             final minStart = index > 0 ? row[index - 1].endTime : 0.0;
             final maxEnd = index < row.length - 1 ? row[index + 1].startTime : project.duration;
 
+            final double textStart = text.startTime.isFinite && !text.startTime.isNaN ? text.startTime : 0.0;
+            final double textEnd = text.endTime.isFinite && !text.endTime.isNaN ? text.endTime : 3.0;
+            final double textWidth = ((textEnd - textStart) * _timeScale).clamp(24.0, double.infinity);
+
             return Positioned(
               key: ValueKey('text_track_${trackIndex}_${text.id}'),
-              left: text.startTime * _timeScale,
-              width: width,
+              left: textStart * _timeScale,
+              width: textWidth.isFinite ? textWidth : 24.0,
               top: 0,
               bottom: 0,
               child: GestureDetector(

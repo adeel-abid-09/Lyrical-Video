@@ -33,6 +33,7 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
   
   bool _isNewProject = true;
   EditorProjectModel? _originalProjectData;
+  bool syncPositionToAll = false;
 
   bool get canUndo => _undoStack.isNotEmpty;
   bool get canRedo => _redoStack.isNotEmpty;
@@ -52,7 +53,9 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
 
   @override
   set state(EditorProjectModel value) {
-    double maxTime = 15.0; // default min length
+    final mainMedia = value.mediaLayers.where((m) => !m.isOverlay && (m.type == MediaType.video || m.type == MediaType.sticker)).firstOrNull;
+    double maxTime = mainMedia != null ? (mainMedia.startTime + mainMedia.mediaDuration) : 15.0;
+    
     for (final layer in value.textLayers) {
       if (layer.endTime > maxTime) maxTime = layer.endTime;
     }
@@ -326,12 +329,74 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectModel> {
 
   void updateTextLayer(TextLayerModel updatedLayer, {bool recordHistory = true}) {
     if (recordHistory) pushHistory();
+    
+    final original = state.textLayers.where((l) => l.id == updatedLayer.id).firstOrNull;
+    final positionChanged = original != null && original.position != updatedLayer.position;
+
     final updated = state.textLayers.map((l) {
-      return l.id == updatedLayer.id ? updatedLayer : l;
+      if (l.id == updatedLayer.id) {
+        return updatedLayer;
+      }
+      if (syncPositionToAll && positionChanged) {
+        return l.copyWith(position: updatedLayer.position);
+      }
+      return l;
     }).toList();
 
     state = state.copyWith(
       textLayers: updated,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void updateAllTextLayersStyle({
+    Color? textColor,
+    Color? strokeColor,
+    double? strokeWidth,
+    Color? backgroundColor,
+    String? fontFamily,
+    double? fontSize,
+    double? rotation,
+    Offset? position,
+    FontWeight? fontWeight,
+    FontStyle? fontStyle,
+    TextAlign? textAlign,
+    double? letterSpacing,
+    double? lineSpacing,
+    double? opacity,
+    String? bubbleStyle,
+    TextAnimationType? animation,
+    double? animationDuration,
+    bool clearBackground = false,
+    bool clearStroke = false,
+    bool clearBubble = false,
+  }) {
+    pushHistory();
+    state = state.copyWith(
+      textLayers: state.textLayers.map((l) {
+        return l.copyWith(
+          textColor: textColor,
+          strokeColor: strokeColor,
+          strokeWidth: strokeWidth,
+          backgroundColor: backgroundColor,
+          fontFamily: fontFamily,
+          fontSize: fontSize,
+          rotation: rotation,
+          position: position,
+          fontWeight: fontWeight,
+          fontStyle: fontStyle,
+          textAlign: textAlign,
+          letterSpacing: letterSpacing,
+          lineSpacing: lineSpacing,
+          opacity: opacity,
+          bubbleStyle: bubbleStyle,
+          animation: animation,
+          animationDuration: animationDuration,
+          clearBackground: clearBackground,
+          clearStroke: clearStroke,
+          clearBubble: clearBubble,
+        );
+      }).toList(),
       updatedAt: DateTime.now(),
     );
   }
