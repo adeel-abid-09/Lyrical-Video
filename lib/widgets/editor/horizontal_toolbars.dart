@@ -1040,6 +1040,54 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
     );
   }
 
+  void _showNumericInputDialog({
+    required String title,
+    required double currentValue,
+    required double min,
+    required double max,
+    required Function(double) onSubmitted,
+  }) {
+    final controller = TextEditingController(text: currentValue.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), ''));
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2C),
+          title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+          content: TextField(
+            controller: controller,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Enter value between $min and $max',
+              hintStyle: const TextStyle(color: Colors.white30),
+              enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+              focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppTheme.primaryAccent)),
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+            ),
+            TextButton(
+              onPressed: () {
+                final double? parsedVal = double.tryParse(controller.text);
+                if (parsedVal != null) {
+                  final clamped = parsedVal.clamp(min, max);
+                  onSubmitted(clamped);
+                }
+                Navigator.pop(context);
+              },
+              child: const Text('OK', style: TextStyle(color: AppTheme.primaryAccent, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = ref.watch(editorProjectProvider);
@@ -2037,8 +2085,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         return [
           const SizedBox(width: 8),
           const Icon(Icons.format_size_rounded, size: 16, color: Colors.white54),
-          Container(
-            width: 170,
+          Expanded(
             child: SliderTheme(
               data: const SliderThemeData(
                 activeTrackColor: AppTheme.primaryAccent,
@@ -2057,10 +2104,31 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               ),
             ),
           ),
-          Text(
-            '${selectedText.fontSize.toInt()} px',
-            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          GestureDetector(
+            onTap: () {
+              _showNumericInputDialog(
+                title: 'Set Text Size (px)',
+                currentValue: selectedText.fontSize,
+                min: 10.0,
+                max: 150.0,
+                onSubmitted: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(fontSize: val));
+                },
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${selectedText.fontSize.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} px',
+                style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold),
+              ),
+            ),
           ),
+          const SizedBox(width: 16),
         ];
 
       case ToolbarCategory.textRotate:
@@ -2073,8 +2141,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         return [
           const SizedBox(width: 8),
           const Icon(Icons.rotate_right_rounded, size: 16, color: Colors.white54),
-          Container(
-            width: 170,
+          Expanded(
             child: SliderTheme(
               data: const SliderThemeData(
                 activeTrackColor: AppTheme.primaryAccent,
@@ -2093,10 +2160,31 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               ),
             ),
           ),
-          Text(
-            '${currentDeg.toInt()}°',
-            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          GestureDetector(
+            onTap: () {
+              _showNumericInputDialog(
+                title: 'Set Rotation (degrees)',
+                currentValue: currentDeg,
+                min: -180.0,
+                max: 180.0,
+                onSubmitted: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(rotation: val * pi / 180.0));
+                },
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${currentDeg.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}°',
+                style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold),
+              ),
+            ),
           ),
+          const SizedBox(width: 16),
         ];
 
       case ToolbarCategory.textLineSpacing:
@@ -2106,8 +2194,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         return [
           const SizedBox(width: 8),
           const Icon(Icons.format_line_spacing_rounded, size: 16, color: Colors.white54),
-          Container(
-            width: 170,
+          Expanded(
             child: SliderTheme(
               data: const SliderThemeData(
                 activeTrackColor: AppTheme.primaryAccent,
@@ -2126,10 +2213,31 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               ),
             ),
           ),
-          Text(
-            '${selectedText.lineSpacing.toStringAsFixed(1)}x',
-            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          GestureDetector(
+            onTap: () {
+              _showNumericInputDialog(
+                title: 'Set Line Spacing',
+                currentValue: selectedText.lineSpacing,
+                min: 0.8,
+                max: 3.0,
+                onSubmitted: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(lineSpacing: val));
+                },
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${selectedText.lineSpacing.toStringAsFixed(1)}x',
+                style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold),
+              ),
+            ),
           ),
+          const SizedBox(width: 16),
         ];
 
       case ToolbarCategory.textLetterSpacing:
@@ -2139,8 +2247,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         return [
           const SizedBox(width: 8),
           const Icon(Icons.space_bar_rounded, size: 16, color: Colors.white54),
-          Container(
-            width: 170,
+          Expanded(
             child: SliderTheme(
               data: const SliderThemeData(
                 activeTrackColor: AppTheme.primaryAccent,
@@ -2159,10 +2266,31 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               ),
             ),
           ),
-          Text(
-            '${selectedText.letterSpacing.toStringAsFixed(1)}px',
-            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          GestureDetector(
+            onTap: () {
+              _showNumericInputDialog(
+                title: 'Set Letter Spacing (px)',
+                currentValue: selectedText.letterSpacing,
+                min: -2.0,
+                max: 20.0,
+                onSubmitted: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(letterSpacing: val));
+                },
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${selectedText.letterSpacing.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}px',
+                style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold),
+              ),
+            ),
           ),
+          const SizedBox(width: 16),
         ];
 
       case ToolbarCategory.textOpacity:
@@ -2172,8 +2300,7 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
         return [
           const SizedBox(width: 8),
           const Icon(Icons.opacity_rounded, size: 16, color: Colors.white54),
-          Container(
-            width: 170,
+          Expanded(
             child: SliderTheme(
               data: const SliderThemeData(
                 activeTrackColor: AppTheme.primaryAccent,
@@ -2192,10 +2319,31 @@ class _HorizontalToolbarsWidgetState extends ConsumerState<HorizontalToolbarsWid
               ),
             ),
           ),
-          Text(
-            '${(selectedText.opacity * 100).toInt()}%',
-            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          GestureDetector(
+            onTap: () {
+              _showNumericInputDialog(
+                title: 'Set Opacity (%)',
+                currentValue: selectedText.opacity * 100,
+                min: 0.0,
+                max: 100.0,
+                onSubmitted: (val) {
+                  _updateTextLayerStyle(selectedText.copyWith(opacity: val / 100.0));
+                },
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${(selectedText.opacity * 100).toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}%',
+                style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold),
+              ),
+            ),
           ),
+          const SizedBox(width: 16),
         ];
 
       case ToolbarCategory.media:
